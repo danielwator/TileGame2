@@ -1,0 +1,5 @@
+# Godot editor cache / imported assets
+game/.godot/
+
+# engine binaries (too large for GitHub; download Godot 4.4.1 into tools/)
+tools/

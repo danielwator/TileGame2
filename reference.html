@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AEONS — Game Reference</title>
+
+<!-- ── Single source of truth: the same authored data the Godot game uses ──
+     game/data/gamedata.json is generated from these files (see Changelog). -->
+<script src="data/ages.js"></script>
+<script src="data/biomes.js"></script>
+<script src="data/resources.js"></script>
+<script src="data/techs.js"></script>
+<script src="data/buildings.js"></script>
+<script src="data/units.js"></script>
+<script src="data/policies.js"></script>
+<script src="data/perks.js"></script>
+<script src="data/specializations.js"></script>
+<script src="data/events.js"></script>
+<script src="data/victories.js"></script>
+<script src="data/changelog.js"></script>
+
+<style>
+:root{
+  --bg:#0a0e16; --bg2:#0e1420; --panel:#131b2a; --panel2:#182338;
+  --border:#26324a; --text:#cfd8e8; --dim:#8593ab;
+  --accent:#e8c15a; --accent2:#5eb9ce; --good:#7ed07e; --bad:#e07a6a; --mag:#b48ce0;
+  --font:'Segoe UI',system-ui,-apple-system,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.5}
+a{color:var(--accent2)}
+::-webkit-scrollbar{width:11px;height:11px}
+::-webkit-scrollbar-thumb{background:#2b3650;border-radius:5px}
+::-webkit-scrollbar-track{background:transparent}
+
+header{position:sticky;top:0;z-index:20;background:linear-gradient(180deg,#0b1120,#0a0e16);
+  border-bottom:1px solid var(--border)}
+.hrow{display:flex;align-items:center;gap:14px;padding:10px 18px}
+.logo{font-size:22px;font-weight:700;letter-spacing:.28em;color:var(--accent)}
+.logo small{font-size:11px;letter-spacing:.05em;color:var(--dim);font-weight:400;margin-left:6px}
+.search{flex:1;max-width:420px;margin-left:auto}
+.search input{width:100%;background:#0c1220;border:1px solid var(--border);border-radius:6px;
+  color:var(--text);padding:8px 12px;font-family:var(--font)}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;padding:0 14px 10px}
+.tab{background:#141d2e;border:1px solid var(--border);border-radius:6px;color:var(--dim);
+  padding:6px 12px;cursor:pointer;font-size:13px}
+.tab:hover{background:#1b2740;color:var(--text)}
+.tab.active{background:#2a3a5e;border-color:var(--accent2);color:#fff}
+
+main{max-width:1280px;margin:0 auto;padding:20px 18px 80px}
+.count{color:var(--dim);font-size:12px;margin-bottom:14px}
+.sec-intro{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:8px;padding:14px 16px;margin-bottom:18px;color:var(--dim)}
+.sec-intro b{color:var(--text)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 14px;
+  transition:border-color .12s}
+.card:hover{border-color:#3a4straight}
+.card:hover{border-color:#3a4a6e}
+.card h3{font-size:15px;color:#eaf0f8;margin-bottom:2px;display:flex;align-items:center;gap:7px}
+.card .meta{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px}
+.card .desc{color:var(--dim);font-size:13px;margin:6px 0}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.chip{font-size:11px;padding:2px 8px;border-radius:10px;background:#0e1626;border:1px solid var(--border);color:var(--text)}
+.chip.good{color:var(--good);border-color:#2f5a2f}
+.chip.bad{color:var(--bad);border-color:#5a2f2f}
+.chip.gold{color:var(--accent)}
+.chip.sci{color:var(--accent2)}
+.chip.mag{color:var(--mag);border-color:#4a3a5e}
+.tag{display:inline-block;font-size:10px;padding:1px 7px;border-radius:4px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.05em}
+
+table.data{width:100%;border-collapse:collapse;margin-top:6px}
+table.data th,table.data td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border);font-size:13px}
+table.data th{color:var(--accent2);font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+  position:sticky;top:0;background:var(--bg)}
+table.data tr:hover td{background:#111a2b}
+.branch-head{margin:22px 0 8px;font-size:16px;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:5px}
+.era-pill{display:inline-block;font-size:10px;padding:1px 7px;border-radius:8px;background:#1a2540;color:var(--dim);margin-left:6px}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.changelog-entry{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px 18px;margin-bottom:14px}
+.changelog-entry h3{color:var(--accent);font-size:16px}
+.changelog-entry .ver{color:var(--dim);font-size:12px;margin-bottom:10px}
+.changelog-entry ul{margin-left:18px}
+.changelog-entry li{margin:4px 0;color:var(--text)}
+.empty{color:var(--dim);padding:40px;text-align:center}
+.legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
+.legend .swatch{width:14px;height:14px;border-radius:3px;display:inline-block;vertical-align:middle;margin-right:5px;border:1px solid #0006}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hrow">
+    <span class="logo">AEONS <small>game reference &amp; wiki</small></span>
+    <div class="search"><input id="q" type="search" placeholder="Search technologies, buildings, units, events…" autocomplete="off"></div>
+  </div>
+  <div class="tabs" id="tabs"></div>
+</header>
+
+<main>
+  <div class="count" id="count"></div>
+  <div id="view"></div>
+</main>
+
+<script>
+'use strict';
+
+const SECTIONS = [
+  ['overview','Overview'],
+  ['ages','Ages'],
+  ['tech','Technologies'],
+  ['buildings','Buildings'],
+  ['units','Units'],
+  ['biomes','Biomes'],
+  ['resources','Resources'],
+  ['policies','Policies'],
+  ['perks','Perks'],
+  ['specs','Specializations'],
+  ['events','Events'],
+  ['victory','Victory'],
+  ['mechanics','Mechanics'],
+  ['changelog','Changelog'],
+];
+
+let state = { section:'overview', search:'' };
+
+function el(tag, cls, html){ const e=document.createElement(tag); if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e; }
+function esc(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function pct(v){ return (v>0?'+':'')+Math.round(v*100)+'%'; }
+function signed(v){ return (v>=0?'+':'')+v; }
+
+const AGE_NAME = id => (AGE_BY_ID[id]?AGE_BY_ID[id].short:('Age '+id));
+const BRANCH = TECH_BRANCHES;
+
+/* ---- effect formatting shared by techs/policies/perks ---- */
+function fmtMod(mod){
+  const out=[];
+  const intKeys={vision:1,maxPolicies:1,tradeCap:1};
+  for(const k in mod){
+    const v=mod[k];
+    if(k in intKeys) out.push(`${signed(v)} ${k}`);
+    else if(k.startsWith('b:')) out.push(`${pct(v)} ${BUILDINGS[k.slice(2)]?BUILDINGS[k.slice(2)].name:k.slice(2)}`);
+    else out.push(`${pct(v)} ${k}`);
+  }
+  return out;
+}
+function chip(txt, cls){ return `<span class="chip ${cls||''}">${esc(txt)}</span>`; }
+function costChips(cost){
+  return Object.entries(cost).filter(([k,v])=>v>0)
+    .map(([k,v])=>chip(`${v} ${k}`,'gold')).join('');
+}
+
+/* ================= section renderers ================= */
+const RENDER = {
+  overview(){
+    const v=el('div');
+    v.appendChild(el('div','sec-intro',
+      `<b>AEONS</b> is a single-planet grand-strategy game played on a tile-covered globe. `+
+      `A seeded, parametric world generator builds each planet from tectonic plates, latitude-driven `+
+      `climate, wind-advected moisture and a Whittaker biome model, then lays an independent hex/pentagon `+
+      `tile grid over the high-resolution terrain field. Lead one nation from the <b>Ancient Age</b> to the `+
+      `<b>Near Future</b> across eight eras, researching ~290 technologies, developing tiles with biome-gated `+
+      `buildings, expanding borders through an influence system, waging war and diplomacy, and pursuing one of `+
+      `five victory conditions.`));
+    const stats=[
+      ['Ages',AGES.length],['Technologies',TECH_LIST.length],['Buildings',BUILDING_LIST.length],
+      ['Units',UNIT_LIST.length],['Biomes',BIOME_LIST.length],['Resources',RESOURCE_LIST.length],
+      ['Deposits',DEPOSIT_LIST.length],['Policies',POLICY_LIST.length],['Perks',PERK_LIST.length],
+      ['Specializations',SPEC_LIST.length],['Events',EVENT_LIST.length],['Victories',VICTORY_LIST.length],
+    ];
+    const grid=el('div','grid');
+    for(const [k,n] of stats){
+      const c=el('div','card');
+      c.innerHTML=`<h3>${n}</h3><div class="meta">${k}</div>`;
+      grid.appendChild(c);
+    }
+    v.appendChild(grid);
+    v.appendChild(el('div','sec-intro',
+      `<b>Resources.</b> Four core yields (Food, Materials, Gold, Science) plus Influence for territory `+
+      `and diplomacy. Three strategic resources unlock late: <b>Coal</b> (Industrial), <b>Oil</b> (Modern) and `+
+      `manufactured <b>Circuits</b> (Information — produced by Chip Fabs from Materials + Gold, requiring a Rare `+
+      `Earth deposit). Advanced buildings and units consume these to operate.`));
+    return v;
+  },
+
+  ages(){
+    const v=el('div');
+    v.appendChild(el('div','sec-intro','A nation advances to the next age after researching a threshold number of its current age\'s technologies, then picks 1 of 3 offered <b>perks</b>. Later ages tick faster in game-years.'));
+    for(const a of AGES){
+      const c=el('div','card');
+      c.style.borderLeft=`3px solid ${a.color}`;
+      c.innerHTML=`<h3>${esc(a.name)} <span class="era-pill">${a.startYear<0?(-a.startYear+' BC'):(a.startYear+' AD')}</span></h3>
+        <div class="desc">${esc(a.desc)}</div>
+        <div class="chips">${chip('advance after '+a.techsToAdvance+' techs')}${chip(a.yearsPerTick+' yrs / tick','sci')}</div>`;
+      v.appendChild(c);
+    }
+    return v;
+  },
+
+  tech(match){
+    const v=el('div');
+    v.appendChild(el('div','sec-intro','~290 technologies in 6 branches. Each chains onto the previous tech of its branch; some add extra prerequisites. Effects apply empire-wide and stack with policies and perks.'));
+    for(const br of Object.keys(BRANCH)){
+      const list=TECH_LIST.filter(t=>t.branch===br && match(t.name+' '+t.desc+' '+t.id));
+      if(!list.length) continue;
+      v.appendChild(el('div','branch-head',`${BRANCH[br].icon} ${BRANCH[br].name} <span class="era-pill">${list.length}</span>`));
+      const tbl=el('table','data');
+      tbl.innerHTML=`<tr><th>Tech</th><th>Age</th><th>Cost</th><th>Effect</th><th>Prereqs</th></tr>`;
+      for(const t of list){
+        const fx=[...fmtMod(t.mod||{}),
+          ...(t.unlockB||[]).map(b=>'⌂ '+(BUILDINGS[b]?BUILDINGS[b].name:b)),
+          ...(t.unlockU||[]).map(u=>'⚔ '+(UNITS[u]?UNITS[u].name:u)),
+          ...(t.flag||[]).map(f=>'⚑ '+f)];
+        const pre=(t.pre||[]).map(p=>TECHS[p]?TECHS[p].name:p).join(', ')||'—';
+        tbl.innerHTML+=`<tr><td><b>${esc(t.name)}</b><div class="desc">${esc(t.desc)}</div></td>
+          <td>${AGE_NAME(t.age)}</td><td class="mono">${t.cost}</td>
+          <td>${fx.map(x=>esc(x)).join('<br>')||'—'}</td>
+          <td class="desc">${esc(pre)}</td></tr>`;
+      }
+      v.appendChild(tbl);
+    }
+    return v;
+  },
+
+  buildings(match){
+    const v=el('div');
+    v.appendChild(el('div','sec-intro','One building per tile, inside your borders within 3 tiles of a city. Biome multipliers change output; some biomes are disallowed unless a technology flag is unlocked. Strategic-resource buildings <b>consume</b> inputs each tick or sit idle.'));
+    const grid=el('div','grid');
+    for(const b of BUILDING_LIST){
+      if(!match(b.name+' '+b.desc+' '+b.id)) continue;
+      const yields=Object.entries(b.yields||{}).map(([k,val])=>chip(`+${val} ${k}`,'good')).join('');
+      const cons=b.consumes?Object.entries(b.consumes).map(([k,val])=>chip(`-${val} ${k}/tick`,'bad')).join(''):'';
+      const place=b.place.on==='land'?'Any land':(Array.isArray(b.place.on)?b.place.on.map(x=>BIOMES[x]?BIOMES[x].name:x).join(', '):b.place.on);
+      const bm=b.biomeMul?Object.entries(b.biomeMul).map(([k,val])=>`${BIOMES[k]?BIOMES[k].name:k} ×${val}`).join(', '):'';
+      const c=el('div','card');
+      c.innerHTML=`<h3>${esc(b.name)}</h3>
+        <div class="meta">${AGE_NAME(b.age)} · ${b.tech?('needs '+(TECHS[b.tech]?TECHS[b.tech].name:b.tech)):'available at start'}${b.unique?' · one per '+b.unique:''}</div>
+        <div class="desc">${esc(b.desc)}</div>
+        <div class="chips">${costChips(b.cost)}${chip(b.time+' ticks','sci')}${chip(b.upkeep+' gold upkeep')}</div>
+        <div class="chips">${yields}${cons}</div>
+        ${b.housing?`<div class="chips">${chip('+'+b.housing+' housing','mag')}${b.defense?chip('+'+b.defense+' defense'):''}</div>`:(b.defense?`<div class="chips">${chip('+'+b.defense+' defense')}</div>`:'')}
+        <div class="desc"><b>Placement:</b> ${esc(place)}${b.place.deposit?' · needs '+DEPOSITS[b.place.deposit].name+' deposit':''}${b.requiresNationDeposit?' · needs '+DEPOSITS[b.requiresNationDeposit].name+' in borders':''}</div>
+        ${bm?`<div class="desc"><b>Biome output:</b> ${esc(bm)}</div>`:''}`;
+      grid.appendChild(c);
+    }
+    v.appendChild(grid);
+    return v;
+  },
+
+  units(match){
+    const v=el('div');
+    v.appendChild(el('div','sec-intro','42 units across civilian, melee, ranged, cavalry, siege, naval and air classes. Some require a strategic deposit within your borders. Siege multipliers apply versus city defenses.'));
+    const byClass={};
+    for(const u of UNIT_LIST){ (byClass[u.cls]=byClass[u.cls]||[]).push(u); }
+    for(const cls of Object.keys(byClass)){
+      const list=byClass[cls].filter(u=>match(u.name+' '+u.desc+' '+u.id));
+      if(!list.length) continue;
+      v.appendChild(el('div','branch-head',cls.charAt(0).toUpperCase()+cls.slice(1)+` units`));
+      const tbl=el('table','data');
+      tbl.innerHTML=`<tr><th>Unit</th><th>Age</th><th>Cost</th><th>ATK</th><th>DEF</th><th>HP</th><th>Move</th><th>Sight</th><th>Needs</th></tr>`;
+      for(const u of list){
+        tbl.innerHTML+=`<tr><td><b>${esc(u.name)}</b><div class="desc">${esc(u.desc)}</div></td>
+          <td>${AGE_NAME(u.age)}</td>
+          <td class="mono">${Object.entries(u.cost).map(([k,val])=>val+' '+k[0]).join(' ')}</td>
+          <td class="mono">${u.atk}</td><td class="mono">${u.def}</td><td class="mono">${u.hp}</td>
+          <td class="mono">${u.move}</td><td class="mono">${u.sight}</td>
+          <td class="desc">${u.needs?DEPOSITS[u.needs].name:'—'}</td></tr>`;
+      }
+      v.appendChild(tbl);
+    }
+    return v;
+  },
+
+  biomes(match){
+    const v=el('div');
+    v.appendChild(el('div','sec-intro','Biomes are classified from temperature × moisture × elevation during world generation. They set base tile yields, movement cost, combat defense, influence-claim cost multiplier and whether a city may be founded there.'));
+    const grid=el('div','grid');
+    for(const b of BIOME_LIST){
+      if(!match(b.name+' '+b.desc)) continue;
+      const y=Object.entries(b.yields).filter(([k,val])=>val>0).map(([k,val])=>chip(`+${val} ${k}`,'good')).join('')||chip('barren');
+      const c=el('div','card');
+      c.innerHTML=`<h3><span class="swatch" style="background:${b.color}"></span>${esc(b.name)}</h3>
+        <div class="meta">${b.water?'water':'land'} ${b.allowsCity?'· settleable':''} ${b.passable?'':'· impassable'}</div>
+        <div class="desc">${esc(b.desc)}</div>
+        <div class="chips">${y}</div>
+        <div class="chips">${chip('move ×'+b.moveCost)}${chip('defense '+signed(b.defense))}${chip('claim ×'+b.infMul)}</div>`;
+      grid.appendChild(c);
+    }
+    v.appendChild(grid);
+    return v;
+  },
+
+  resources(match){
+    const v=el('div');
+    v.appendChild(el('div','sec-intro','Stockpiled nation resources and the tile deposits that boost them. Deposits are hidden until the listed technology reveals them.'));
+    v.appendChild(el('div','branch-head','Stockpiled Resources'));
+    const g1=el('div','grid');
+    for(const r of RESOURCE_LIST){
+      if(!match(r.name+' '+r.desc)) continue;
+      const c=el('div','card');
+      c.innerHTML=`<h3>${r.icon} ${esc(r.name)}</h3><div class="meta">${r.tier}${r.unlockAge?' · from '+AGE_NAME(r.unlockAge):''}</div>
+        <div class="desc">${esc(r.desc)}</div>`;
+      g1.appendChild(c);
+    }
+    v.appendChild(g1);
+    v.appendChild(el('div','branch-head','Tile Deposits'));
+    const g2=el('div','grid');
+    for(const d of DEPOSIT_LIST){
+      if(!match(d.name+' '+d.desc+' '+d.effect)) continue;
+      const c=el('div','card');
+      c.innerHTML=`<h3>${d.icon} ${esc(d.name)}</h3>
+        <div class="meta">${d.revealTech?('revealed by '+(TECHS[d.revealTech]?TECHS[d.revealTech].name:d.revealTech)):'visible from start'}</div>
+        <div class="desc">${esc(d.desc)}</div>
+        <div class="chips">${chip(d.effect,'good')}</div>
+        <div class="desc"><b>Found in:</b> ${Object.keys(d.spawn).map(x=>BIOMES[x]?BIOMES[x].name:x).join(', ')}</div>`;
+      g2.appendChild(c);
+    }
+    v.appendChild(g2);
+    return v;
+  },
+
+  policies(match){
+    const v=el('div');
+    v.appendChild(el('div','sec-intro','Policies fill limited slots unlocked by Statecraft technologies. Enacting costs Influence; effects stack with techs and perks. Grouped by type: economy, military, society.'));
+    const grid=el('div','grid');
+    for(const p of POLICY_LIST){
+      if(!match(p.name+' '+p.desc)) continue;
+      const c=el('div','card');
+      c.innerHTML=`<h3>${esc(p.name)}</h3>
+        <div class="meta">${p.type} · ${AGE_NAME(p.age)} · ${p.tech?('needs '+(TECHS[p.tech]?TECHS[p.tech].name:p.tech)):'from start'}</div>
+        <div class="desc">${esc(p.desc)}</div>
+        <div class="chips">${chip(p.cost+' influence','mag')}${fmtMod(p.mod).map(x=>chip(x)).join('')}</div>`;
+      grid.appendChild(c);
+    }
+    v.appendChild(grid);
+    return v;
+  },
+
+  perks(match){
+    const v=el('div');
+    v.appendChild(el('div','sec-intro','Each new age, a nation picks 1 of 3 offered perks (7 picks over a full game). Perks are permanent and stack with everything.'));
+    const grid=el('div','grid');
+    for(const p of PERK_LIST){
+      if(!match(p.name+' '+p.desc)) continue;
+      const c=el('div','card');
+      c.innerHTML=`<h3>${p.icon} ${esc(p.name)}</h3>
+        <div class="meta">available from ${AGE_NAME(p.minAge||2)}</div>
+        <div class="desc">${esc(p.desc)}</div>
+        <div class="chips">${fmtMod(p.mod).map(x=>chip(x,'mag')).join('')}</div>`;
+      grid.appendChild(c);
+    }
+    v.appendChild(grid);
+    return v;
+  },
+
+  specs(match){
+    const v=el('div');
+    v.appendChild(el('div','sec-intro','A city of 5+ population may adopt one specialization (Influence cost; changeable at double cost). Modifiers apply only to that city.'));
+    const grid=el('div','grid');
+    for(const s of SPEC_LIST){
+      if(!match(s.name+' '+s.desc)) continue;
+      const c=el('div','card');
+      c.innerHTML=`<h3>${s.icon} ${esc(s.name)}</h3>
+        <div class="meta">${s.cost} influence${s.tech?' · needs '+(TECHS[s.tech]?TECHS[s.tech].name:s.tech):''}${s.requiresB?' · needs '+(BUILDINGS[s.requiresB]?BUILDINGS[s.requiresB].name:s.requiresB):''}</div>
+        <div class="desc">${esc(s.desc)}</div>
+        <div class="chips">${Object.entries(s.mod).map(([k,val])=>chip(pct(val)+' '+k,val>0?'good':'bad')).join('')}</div>`;
+      grid.appendChild(c);
+    }
+    v.appendChild(grid);
+    return v;
+  },
+
+  events(match){
+    const v=el('div');
+    v.appendChild(el('div','sec-intro','Each tick a nation may roll a random event. Weights are relative among currently-eligible events; flat resource amounts scale with the era. Some events present a choice.'));
+    const tbl=el('table','data');
+    tbl.innerHTML=`<tr><th>Event</th><th>Ages</th><th>Weight</th><th>Type</th><th>Effect</th><th>Condition</th></tr>`;
+    for(const e of EVENT_LIST){
+      if(!match(e.name+' '+e.desc)) continue;
+      let fx=[];
+      if(e.fx.res) fx.push(...Object.entries(e.fx.res).map(([k,val])=>`${signed(val)} ${k}`));
+      if(e.fx.mod) fx.push(...fmtMod(e.fx.mod).map(x=>x+(e.duration?` (${e.duration}t)`:'')));
+      if(e.fx.pop) fx.push(`${signed(e.fx.pop)} population`);
+      if(e.fx.hostiles) fx.push(`spawn ${e.fx.hostiles} raiders`);
+      if(e.fx.wreckBuilding) fx.push('destroy a building');
+      if(e.fx.armyDamage) fx.push(`armies -${Math.round(e.fx.armyDamage*100)}% HP`);
+      if(e.fx.findDeposit) fx.push('reveal a deposit');
+      if(e.fx.exhaustDeposit) fx.push('remove a deposit');
+      if(e.choice) fx.push('CHOICE: '+e.choice.map(c=>c.label).join(' / '));
+      tbl.innerHTML+=`<tr><td><b>${e.icon} ${esc(e.name)}</b><div class="desc">${esc(e.desc)}</div></td>
+        <td>${AGE_NAME(e.minAge)}–${AGE_NAME(e.maxAge)}</td>
+        <td class="mono">${e.weight}</td>
+        <td><span class="tag" style="background:${e.good?'#1e3a1e':'#3a1e1e'};color:${e.good?'var(--good)':'var(--bad)'}">${e.good?'boon':'bane'}</span></td>
+        <td>${fx.map(x=>esc(x)).join('<br>')}</td>
+        <td class="desc">${e.cond?esc(e.cond):'—'}</td></tr>`;
+    }
+    v.appendChild(tbl);
+    return v;
+  },
+
+  victory(match){
+    const v=el('div');
+    v.appendChild(el('div','sec-intro','Five paths to victory. The game also ends at year 2200 with a Score victory if no other condition is met.'));
+    const grid=el('div','grid');
+    for(const vc of VICTORY_LIST){
+      if(!match(vc.name+' '+vc.desc)) continue;
+      const c=el('div','card');
+      c.innerHTML=`<h3>${vc.icon} ${esc(vc.name)}</h3>
+        <div class="desc">${esc(vc.desc)}</div>
+        <div class="chips">${chip(vc.check,'sci')}</div>`;
+      grid.appendChild(c);
+    }
+    v.appendChild(grid);
+    return v;
+  },
+
+  mechanics(){
+    const v=el('div');
+    const M=[
+      ['World Generation','A seeded pipeline: tectonic plates with motion vectors → convergent/divergent boundary stress (mountain belts, island arcs, rifts, trenches) → elevation (plate base + fractal noise + stress + hotspot island chains) → sea level at the target ocean fraction → temperature (latitude curve, altitude lapse) → moisture (prevailing-wind advection from oceans, orographic rain shadows, ITCZ and horse-latitude belts, rank-normalized) → Whittaker biome matrix. The terrain field is computed at 3× tile resolution and rendered with real relief; the gameplay tile layer aggregates it.'],
+      ['Tiles vs. Field','The high-resolution geodesic field (terrain generation + rendering) is independent of the coarser Goldberg hex/pentagon tile layer (gameplay). Each tile takes the majority biome of the field vertices inside it.'],
+      ['Economy','Each city works its buildings up to its population. Buildings produce yields modified by biome, technologies, policies, perks and city specialization, and boosted by matching tile deposits. Population eats 1 Food/tick; surplus grows cities, deficit starves them. Gold pays building and unit upkeep — bankruptcy causes army desertion.'],
+      ['Influence &amp; Borders','Claiming a tile costs Influence scaling with biome and distance from your cities. The capital projects influence 40% farther than other cities. Every non-city border tile has an Influence upkeep that grows with distance; when Influence runs dry the farthest tile reverts to neutral.'],
+      ['Strategic Resources','Coal (Industrial), Oil (Modern) and Circuits (Information) gate advanced buildings and units. Coal/Oil are mined from deposits; Circuits are manufactured by Chip Fabs from Materials + Gold and require a Rare Earth deposit inside your borders. Buildings that consume a strategic resource sit idle if it runs out.'],
+      ['Fog of War','Three states: Unknown (never seen, near-black), Discovered (terrain, biome, deposits and owner known but dimmed — no current activity), and Visible (full detail). Visibility comes from owned tiles + 2 rings, unit sight radii and allied shared vision.'],
+      ['Combat','Attacker strength vs. defender strength with terrain defense, experience, anti-cavalry bonuses and ranged (no counter-attack). Siege units deal multiplied damage to city defenses; only melee/cavalry can capture a fallen city. Armies heal in friendly territory.'],
+      ['Diplomacy','Pairwise relations drift with shared borders, age parity, alliances and wars. Statuses: peace, non-aggression pact, alliance, war. Trade deals yield Gold to both sides (capacity set by tech). Declaring war on a nation pulls in its defensive allies.'],
+      ['Ages &amp; Perks','Advancing an age requires researching a threshold of that age\'s techs, then choosing 1 of 3 perks. Later ages advance the calendar faster.'],
+      ['Random Events','Per-tick chance of a boon or bane, weighted and era-scaled, some conditional (at war, coastal, owns a biome/building/deposit) and some offering a choice. Nation perks and some techs improve event luck.'],
+    ];
+    for(const [t,d] of M){
+      const c=el('div','card'); c.style.gridColumn='1/-1';
+      c.innerHTML=`<h3>${t}</h3><div class="desc">${d}</div>`;
+      v.appendChild(c);
+    }
+    v.style.display='grid'; v.style.gap='12px';
+    return v;
+  },
+
+  changelog(){
+    const v=el('div');
+    for(const e of CHANGELOG){
+      const c=el('div','changelog-entry');
+      c.innerHTML=`<h3>v${e.version} — ${esc(e.title)}</h3><div class="ver">${e.date}</div>
+        <ul>${e.changes.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;
+      v.appendChild(c);
+    }
+    v.appendChild(el('div','sec-intro','<b>Data pipeline.</b> All content above is authored in <span class="mono">data/*.js</span> and this page reads it directly. The Godot game loads <span class="mono">game/data/gamedata.json</span>, regenerated from the same files, so the wiki and the game never drift.'));
+    return v;
+  },
+};
+
+/* ================= boot ================= */
+function makeMatcher(){
+  const q=state.search.trim().toLowerCase();
+  return (txt)=> q==='' || String(txt).toLowerCase().includes(q);
+}
+function render(){
+  const view=document.getElementById('view');
+  view.innerHTML='';
+  const match=makeMatcher();
+  const node=RENDER[state.section](match);
+  view.appendChild(node);
+  // count
+  const counts={tech:TECH_LIST.length,buildings:BUILDING_LIST.length,units:UNIT_LIST.length,
+    biomes:BIOME_LIST.length,policies:POLICY_LIST.length,perks:PERK_LIST.length,
+    specs:SPEC_LIST.length,events:EVENT_LIST.length};
+  const cEl=document.getElementById('count');
+  cEl.textContent = counts[state.section]!=null ? `${counts[state.section]} entries`+(state.search?` · filtering "${state.search}"`:'') : '';
+}
+function buildTabs(){
+  const tabs=document.getElementById('tabs');
+  for(const [id,label] of SECTIONS){
+    const t=el('div','tab'+(id===state.section?' active':''),label);
+    t.onclick=()=>{ state.section=id; document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); render(); };
+    tabs.appendChild(t);
+  }
+}
+document.getElementById('q').addEventListener('input',e=>{ state.search=e.target.value; render(); });
+window.onerror=(m,s,l)=>{ document.getElementById('view').innerHTML=`<div class="empty">Error: ${m} (line ${l})<br>Make sure the data/ folder sits next to this file.</div>`; };
+buildTabs();
+render();
+</script>
+</body>
+</html>

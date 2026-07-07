@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AEONS — a globe strategy game</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<!-- ── in-game HUD ── -->
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <div id="res-bar"></div>
+    <div id="date-ctrl"></div>
+    <div id="top-menus"></div>
+  </div>
+  <div id="notif"></div>
+  <div id="panel-left" class="panel hidden"></div>
+  <div id="panel-right" class="panel hidden"></div>
+  <div id="lens-bar"></div>
+  <div id="minihelp"></div>
+</div>
+
+<!-- ── modal layers ── -->
+<div id="screen-modal" class="hidden"></div>
+<div id="event-modal" class="hidden"></div>
+<div id="tooltip" class="hidden"></div>
+
+<!-- ── main menu ── -->
+<div id="menu"></div>
+
+<!-- ── engine ── -->
+<script src="lib/three.min.js"></script>
+<script src="src/core/util.js"></script>
+<script src="src/core/noise.js"></script>
+
+<!-- ── game data (shared with reference.html) ── -->
+<script src="data/ages.js"></script>
+<script src="data/biomes.js"></script>
+<script src="data/resources.js"></script>
+<script src="data/techs.js"></script>
+<script src="data/buildings.js"></script>
+<script src="data/units.js"></script>
+<script src="data/policies.js"></script>
+<script src="data/perks.js"></script>
+<script src="data/specializations.js"></script>
+<script src="data/events.js"></script>
+<script src="data/victories.js"></script>
+<script src="data/changelog.js"></script>
+
+<!-- ── world ── -->
+<script src="src/world/hexsphere.js"></script>
+<script src="src/world/worldgen.js"></script>
+
+<!-- ── rendering ── -->
+<script src="src/render/globe.js"></script>
+<script src="src/render/colors.js"></script>
+<script src="src/render/camera.js"></script>
+<script src="src/render/markers.js"></script>
+
+<!-- ── game systems ── -->
+<script src="src/game/fog.js"></script>
+<script src="src/game/nation.js"></script>
+<script src="src/game/military.js"></script>
+<script src="src/game/diplomacy.js"></script>
+<script src="src/game/events.js"></script>
+<script src="src/game/ai.js"></script>
+<script src="src/game/game.js"></script>
+
+<!-- ── UI ── -->
+<script src="src/ui/ui.js"></script>
+<script src="src/ui/panels.js"></script>
+<script src="src/ui/techtree.js"></script>
+<script src="src/ui/screens.js"></script>
+<script src="src/ui/menu.js"></script>
+
+<script src="src/main.js"></script>
+</body>
+</html>
