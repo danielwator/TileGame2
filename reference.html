@@ -139,7 +139,7 @@ const BRANCH = TECH_BRANCHES;
 /* ---- effect formatting shared by techs/policies/perks ---- */
 function fmtMod(mod){
   const out=[];
-  const intKeys={vision:1,maxPolicies:1,tradeCap:1};
+  const intKeys={vision:1,maxPolicies:1,tradeCap:1,researchOptions:1};
   for(const k in mod){
     const v=mod[k];
     if(k in intKeys) out.push(`${signed(v)} ${k}`);
@@ -421,7 +421,7 @@ const RENDER = {
   mechanics(){
     const v=el('div');
     const M=[
-      ['World Generation','A seeded pipeline: tectonic plates with motion vectors → convergent/divergent boundary stress (mountain belts, island arcs, rifts, trenches) → elevation (plate base + fractal noise + stress + hotspot island chains) → sea level at the target ocean fraction → temperature (latitude curve, altitude lapse) → moisture (prevailing-wind advection from oceans, orographic rain shadows, ITCZ and horse-latitude belts, rank-normalized) → Whittaker biome matrix. The terrain field is computed at 3× tile resolution and rendered with real relief; the gameplay tile layer aggregates it.'],
+      ['World Generation','Ported from the original TileGame project: a seeded 1024×512 equirectangular grid with hidden tectonic plates (domain-warped Voronoi with drift-based convergent/divergent stress), continental + detail + ridged elevation noise with polar caps, moisture with ITCZ/Hadley bands and tectonic rain shadows, and a 25-type Whittaker classification (jungles, mangroves, coral reefs, salt flats, alpine meadows…). Post passes fill and smooth lakes, cull tiny islands, carve navigable coastal shallows, and route meandering rivers to the sea over depression-filled elevation. The globe re-classifies the fields per pixel with the original palette, so coastlines stay crisp at any zoom.'],
       ['Tiles vs. Field','The high-resolution geodesic field (terrain generation + rendering) is independent of the coarser Goldberg hex/pentagon tile layer (gameplay). Each tile takes the majority biome of the field vertices inside it for map info, movement and defense — and its full biome composition for district slots.'],
       ['Districts &amp; Building Slots','Every tile has <b>8 building slots</b>, apportioned from the biome mix the tile spans by the largest-remainder method: a tile that is 70% forest / 20% ocean / 10% desert gets 5 forest, 2 ocean and 1 desert slot. Each slot only accepts buildings allowed on its biome and applies that biome\'s output multiplier, so a single coastal tile can run a Lumber Camp, a Fishery and a Farm side by side. City centers occupy one slot of their tile; deposit extractors are limited to one per deposit tile; buildings can be demolished to free a slot.'],
       ['Economy','Each city works its buildings up to its population (1 pop operates 1 building; the city center is free). Buildings produce yields modified by their slot\'s biome, technologies, policies, perks and city specialization; a tile\'s deposit boosts the first matching building on it. Population eats 1 Food/tick; surplus grows cities, deficit starves them. Gold pays building and unit upkeep — bankruptcy causes army desertion.'],
@@ -430,6 +430,7 @@ const RENDER = {
       ['Fog of War','Three states: Unknown (never seen, near-black), Discovered (terrain, biome, deposits and owner known but dimmed — no current activity), and Visible (full detail). Visibility comes from owned tiles + 2 rings, unit sight radii and allied shared vision.'],
       ['Combat','Attacker strength vs. defender strength with terrain defense, experience, anti-cavalry bonuses and ranged (no counter-attack). Siege units deal multiplied damage to city defenses; only melee/cavalry can capture a fallen city. Armies heal in friendly territory.'],
       ['Diplomacy','Pairwise relations drift with shared borders, age parity, alliances and wars. Statuses: peace, non-aggression pact, alliance, war. Trade deals yield Gold to both sides (capacity set by tech). Declaring war on a nation pulls in its defensive allies.'],
+      ['Research Draw','Research is chosen from a <b>drawn hand of options</b> (base 3; Writing, Scientific Method and Computers each add +1). The draw is weighted toward the branches your nation is <b>spec\'d into</b>: your researched-tech history, active policies (military policies pull Military techs…), perks and city specializations all raise their branch\'s weight, and current-age techs appear more often. You may reroll the hand for Influence (cost scales with age). Science accrues even while no research is selected (banked toward the next pick). The full tech tree screen shows the current hand highlighted in gold.'],
       ['Ages &amp; Perks','Advancing an age requires researching a threshold of that age\'s techs, then choosing 1 of 3 perks. Later ages advance the calendar faster.'],
       ['Random Events','Per-tick chance of a boon or bane, weighted and era-scaled, some conditional (at war, coastal, owns a biome/building/deposit) and some offering a choice. Nation perks and some techs improve event luck.'],
     ];

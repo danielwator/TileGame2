@@ -48,11 +48,47 @@ func setup(m) -> void:
 	_build_toasts()
 	_build_panels()
 	_build_hover_label()
+	_build_research_box()
 	_build_win_layer()
 	game.toast.connect(_on_toast)
 	game.event_popup.connect(_on_event_popup)
 	game.perk_offer.connect(_on_perk_offer)
+	game.research_offer.connect(_on_research_offer)
 	game.victory.connect(_on_victory)
+	if not game.nations[game.human_id].research_options.is_empty():
+		_on_research_offer(game.human_id)
+
+
+# ================= image placeholders =================
+# Drop a PNG at assets/icons/<id>.png and it replaces the placeholder box.
+
+func _icon_box(icon_id: String, size := Vector2(48, 48)) -> Control:
+	var path := "res://assets/icons/%s.png" % icon_id
+	if ResourceLoader.exists(path):
+		var tr := TextureRect.new()
+		tr.texture = load(path)
+		tr.custom_minimum_size = size
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		return tr
+	var pb := PanelContainer.new()
+	pb.custom_minimum_size = size
+	var st := StyleBoxFlat.new()
+	st.bg_color = Color(0.09, 0.11, 0.17)
+	st.border_color = Color(0.3, 0.36, 0.5, 0.7)
+	st.set_border_width_all(1)
+	st.set_corner_radius_all(4)
+	pb.add_theme_stylebox_override("panel", st)
+	var l := Label.new()
+	l.text = "IMG" if size.x < 40 else "IMG\n" + icon_id
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.add_theme_font_size_override("font_size", 8 if size.x < 40 else 9)
+	l.add_theme_color_override("font_color", Color(0.42, 0.48, 0.6))
+	l.clip_text = true
+	pb.add_child(l)
+	pb.tooltip_text = "art placeholder: assets/icons/%s.png" % icon_id
+	return pb
 
 
 func _pstyle(border := Color(0.17, 0.21, 0.31)) -> StyleBoxFlat:
@@ -80,16 +116,29 @@ func _build_topbar() -> void:
 	bar.add_child(h)
 
 	for k in RES_ORDER:
+		var cell := HBoxContainer.new()
+		cell.add_theme_constant_override("separation", 4)
+		h.add_child(cell)
+		cell.add_child(_icon_box("res_" + k, Vector2(18, 18)))
 		var l := Label.new()
 		l.add_theme_color_override("font_color", RES_COLORS[k])
 		l.add_theme_font_size_override("font_size", 14)
-		h.add_child(l)
+		cell.add_child(l)
 		_res_labels[k] = l
+		l.set_meta("cell", cell)
 
 	_research_btn = Button.new()
 	_research_btn.flat = true
 	_research_btn.add_theme_color_override("font_color", COL_ACCENT2)
-	_research_btn.pressed.connect(func() -> void: _open_tech_window())
+	_research_btn.pressed.connect(func() -> void:
+		var nat = game.nations[game.human_id]
+		if nat.researching == "" and not nat.research_options.is_empty():
+			if _research_box.visible:
+				_research_box.visible = false
+			else:
+				_on_research_offer(game.human_id)
+		else:
+			_open_tech_window())
 	h.add_child(_research_btn)
 
 	var spacer := Control.new()
@@ -142,10 +191,11 @@ func tick_update(delta: float) -> void:
 	var upkeep: Dictionary = nat.get_meta("upkeep") if nat.has_meta("upkeep") else {}
 	for k in RES_ORDER:
 		var l: Label = _res_labels[k]
+		var cell: Control = l.get_meta("cell")
 		if (k == "coal" and nat.age < 5) or (k == "oil" and nat.age < 6) or (k == "circuits" and nat.age < 7):
-			l.visible = false
+			cell.visible = false
 			continue
-		l.visible = true
+		cell.visible = true
 		var rate: float = income.get(k, 0.0)
 		if k == "gold":
 			rate -= upkeep.get("gold", 0.0)
@@ -161,8 +211,10 @@ func tick_update(delta: float) -> void:
 	if nat.researching != "":
 		var t: Dictionary = Data.techs[nat.researching]
 		_research_btn.text = "Sci: %s  %d/%d (+%.1f)" % [t.name, int(nat.research_progress), int(t.cost), income.get("science", 0.0)]
+	elif not nat.research_options.is_empty():
+		_research_btn.text = "Sci: PICK RESEARCH — %d options (+%.1f)" % [nat.research_options.size(), income.get("science", 0.0)]
 	else:
-		_research_btn.text = "Sci: CHOOSE RESEARCH (+%.1f)" % income.get("science", 0.0)
+		_research_btn.text = "Sci: (+%.1f banked)" % income.get("science", 0.0)
 	var age_def: Dictionary = Data.age_by_id[nat.age]
 	var yr := int(absf(game.year))
 	_age_label.text = "%s  •  %d %s" % [age_def.short, yr, "BC" if game.year < 0 else "AD"]
@@ -311,7 +363,15 @@ func _refresh_tile_panel() -> void:
 	_clear(_tile_box)
 	var fogst: int = game.fog_state(game.human_id, t)
 	var bio: Dictionary = Data.biomes[game.world.t_biome[t]]
-	_lbl(_tile_box, bio.name, COL_ACCENT, 16)
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 8)
+	_tile_box.add_child(title_row)
+	title_row.add_child(_icon_box("biome_" + game.world.t_biome[t], Vector2(40, 40)))
+	var tl := Label.new()
+	tl.text = bio.name + (" ⏦" if game.world.t_river[t] == 1 else "")
+	tl.add_theme_color_override("font_color", COL_ACCENT)
+	tl.add_theme_font_size_override("font_size", 16)
+	title_row.add_child(tl)
 	var o: int = game.owner[t]
 	if o >= 0:
 		_lbl(_tile_box, "Territory of %s" % game.nations[o].display_name, game.nations[o].color)
@@ -440,7 +500,16 @@ func _slot_details(t: int, s: int) -> void:
 	var b = game.slot_building(t, s)
 	if b != null:
 		var bdef: Dictionary = Data.buildings[b.id]
-		_lbl(_tile_box, "%s  (%s slot)" % [bdef.name, Data.biomes[bio].name], COL_ACCENT2)
+		var brow := HBoxContainer.new()
+		brow.add_theme_constant_override("separation", 8)
+		_tile_box.add_child(brow)
+		brow.add_child(_icon_box("building_" + b.id, Vector2(40, 40)))
+		var bl := Label.new()
+		bl.text = "%s  (%s slot)" % [bdef.name, Data.biomes[bio].name]
+		bl.add_theme_color_override("font_color", COL_ACCENT2)
+		bl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		bl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		brow.add_child(bl)
 		if not b.done:
 			_lbl(_tile_box, "Under construction: %d / %d ticks" % [b.progress, b.time], COL_DIM, 12)
 		var out_txt := ""
@@ -543,7 +612,15 @@ func _refresh_city_panel() -> void:
 		return
 	_clear(_city_box)
 	var nat = game.nations[c.nation_id]
-	_lbl(_city_box, "%s %s" % ["★" if c.is_original_capital else "", c.cname], COL_ACCENT, 17)
+	var crow := HBoxContainer.new()
+	crow.add_theme_constant_override("separation", 8)
+	_city_box.add_child(crow)
+	crow.add_child(_icon_box("city_portrait", Vector2(48, 48)))
+	var cl := Label.new()
+	cl.text = "%s %s" % ["★" if c.is_original_capital else "", c.cname]
+	cl.add_theme_color_override("font_color", COL_ACCENT)
+	cl.add_theme_font_size_override("font_size", 17)
+	crow.add_child(cl)
 	_lbl(_city_box, nat.display_name, nat.color)
 	_lbl(_city_box, "Population %d / %d    Growth %d%%" % [c.pop, game.city_max_pop(c),
 		int(clampf(c.growth / (12.0 + 8.0 * c.pop), 0, 1) * 100.0)])
@@ -597,6 +674,107 @@ func _refresh_city_panel() -> void:
 				why == "",
 				"%s\nATK %s  DEF %s  HP %s  MOVE %s%s" % [u.desc, str(u.atk), str(u.def), str(u.hp), str(u.move),
 					("\n" + why) if why != "" else ""])
+
+
+# ================= research draw chooser =================
+
+var _research_box: PanelContainer
+
+
+func _build_research_box() -> void:
+	_research_box = PanelContainer.new()
+	_research_box.add_theme_stylebox_override("panel", _pstyle(COL_ACCENT2))
+	_research_box.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_research_box.visible = false
+	add_child(_research_box)
+	_research_box.resized.connect(func() -> void:
+		if is_instance_valid(_research_box):
+			var vp := get_viewport().get_visible_rect().size
+			_research_box.position = Vector2((vp.x - _research_box.size.x) / 2.0, vp.y - _research_box.size.y - 14.0))
+
+
+func _on_research_offer(_n: int) -> void:
+	_refresh_research_box()
+	_research_box.visible = true
+	# shrink-wrap after the layout pass has computed the new minimum size
+	_research_box.call_deferred("reset_size")
+
+
+func _refresh_research_box() -> void:
+	for c in _research_box.get_children():
+		_research_box.remove_child(c)
+		c.queue_free()
+	var nat = game.nations[game.human_id]
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 6)
+	_research_box.add_child(v)
+	var head := HBoxContainer.new()
+	v.add_child(head)
+	var title := Label.new()
+	title.text = "Choose your next research  (%d options)" % nat.research_options.size()
+	title.add_theme_color_override("font_color", COL_ACCENT2)
+	title.add_theme_font_size_override("font_size", 15)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(title)
+	var reroll := Button.new()
+	reroll.text = "Reroll (%d Inf)" % int(game.reroll_cost(game.human_id))
+	reroll.pressed.connect(func() -> void:
+		var err: String = game.reroll_research(game.human_id)
+		if err != "":
+			_on_toast(err, "warn")
+		else:
+			_refresh_research_box()
+			_research_box.call_deferred("reset_size"))
+	head.add_child(reroll)
+	var later := Button.new()
+	later.text = "Later"
+	later.pressed.connect(func() -> void: _research_box.visible = false)
+	head.add_child(later)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	v.add_child(row)
+	for tid: String in nat.research_options:
+		var t: Dictionary = Data.techs[tid]
+		var branch: Dictionary = Data.tech_branches[t.branch]
+		var card := PanelContainer.new()
+		card.add_theme_stylebox_override("panel", _pstyle(Color(branch.color)))
+		card.custom_minimum_size = Vector2(190, 0)
+		row.add_child(card)
+		var cv := VBoxContainer.new()
+		cv.add_theme_constant_override("separation", 4)
+		card.add_child(cv)
+		var icon_row := HBoxContainer.new()
+		icon_row.alignment = BoxContainer.ALIGNMENT_CENTER
+		cv.add_child(icon_row)
+		icon_row.add_child(_icon_box("tech_" + tid, Vector2(52, 52)))
+		var nm := Label.new()
+		nm.text = t.name
+		nm.add_theme_font_size_override("font_size", 14)
+		nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		nm.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		cv.add_child(nm)
+		var meta := Label.new()
+		meta.text = "%s  •  %d Sci" % [branch.name, int(t.cost)]
+		meta.add_theme_color_override("font_color", Color(branch.color))
+		meta.add_theme_font_size_override("font_size", 11)
+		meta.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cv.add_child(meta)
+		var fx := Label.new()
+		fx.text = _fx_text(t)
+		fx.add_theme_color_override("font_color", COL_ACCENT2)
+		fx.add_theme_font_size_override("font_size", 10)
+		fx.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		fx.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cv.add_child(fx)
+		var pick := Button.new()
+		pick.text = "Research"
+		pick.tooltip_text = t.desc
+		var tid2 := tid
+		pick.pressed.connect(func() -> void:
+			if game.pick_research(game.human_id, tid2):
+				_research_box.visible = false)
+		cv.add_child(pick)
 
 
 # ================= modal windows =================
@@ -655,7 +833,7 @@ func _fx_text(t: Dictionary) -> String:
 	if t.mod != null:
 		for k: String in t.mod:
 			var v: float = t.mod[k]
-			if k in ["vision", "maxPolicies", "tradeCap"]:
+			if k in ["vision", "maxPolicies", "tradeCap", "researchOptions"]:
 				parts.append("+%d %s" % [int(v), k])
 			else:
 				parts.append("%s%d%% %s" % ["+" if v > 0 else "", int(v * 100), k])
@@ -699,13 +877,18 @@ func _open_tech_window() -> void:
 			b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 			b.tooltip_text = "%s\n%s" % [t.desc, _fx_text(t)]
 			var tid: String = t.id
+			var offered: bool = nat.research_options.has(tid)
 			if nat.researched.has(tid):
 				b.modulate = Color(0.55, 0.95, 0.55)
 				b.disabled = true
 			elif nat.researching == tid:
 				b.modulate = Color(0.5, 0.85, 1.0)
+			elif offered:
+				b.modulate = Color(1.0, 0.85, 0.4)
+				b.tooltip_text += "\n★ CURRENTLY OFFERED — click to research."
 			elif game.tech_available(game.human_id, tid):
 				b.modulate = Color(1, 1, 1)
+				b.tooltip_text += "\nAvailable, but not in the current research draw."
 			else:
 				b.modulate = Color(0.55, 0.55, 0.6)
 				var missing: Array = []
@@ -714,8 +897,8 @@ func _open_tech_window() -> void:
 						missing.append(Data.techs[pre].name)
 				b.tooltip_text += "\nRequires: " + ", ".join(missing)
 			b.pressed.connect(func() -> void:
-				if game.tech_available(game.human_id, tid):
-					game.set_research(game.human_id, tid)
+				if game.pick_research(game.human_id, tid):
+					_research_box.visible = false
 					_close_window())
 			col.add_child(b)
 
@@ -909,6 +1092,10 @@ func _close_dialog() -> void:
 
 func _on_event_popup(_n: int, ev: Dictionary, has_choice: bool) -> void:
 	var v := _dialog_box("%s" % ev.name, COL_GOOD if ev.good else COL_BAD)
+	var art := HBoxContainer.new()
+	art.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_child(art)
+	art.add_child(_icon_box("event_" + ev.id, Vector2(96, 64)))
 	var d := Label.new()
 	d.text = ev.desc
 	d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -930,9 +1117,18 @@ func _on_perk_offer(_n: int) -> void:
 	for pid: String in nat.pending_perks:
 		var p: Dictionary = Data.perks[pid]
 		var pid2 := pid
-		_btn(v, "%s — %s" % [p.name, p.desc], func() -> void:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		v.add_child(row)
+		row.add_child(_icon_box("perk_" + pid, Vector2(40, 40)))
+		var btn := Button.new()
+		btn.text = "%s — %s" % [p.name, p.desc]
+		btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.pressed.connect(func() -> void:
 			game.pick_perk(game.human_id, pid2)
 			_close_dialog())
+		row.add_child(btn)
 
 
 func _on_victory(n: int, vid: String) -> void:
@@ -963,6 +1159,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			KEY_ESCAPE:
 				if _window != null:
 					_close_window()
+				elif _research_box != null and _research_box.visible:
+					_research_box.visible = false
 				else:
 					selected_unit_id = -1
 					main.selected_tile = -1

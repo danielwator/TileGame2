@@ -11,6 +11,7 @@ extends RefCounted
 signal toast(msg: String, kind: String)
 signal event_popup(nation_id: int, ev: Dictionary, has_choice: bool)
 signal perk_offer(nation_id: int)
+signal research_offer(nation_id: int)
 signal victory(nation_id: int, victory_id: String)
 
 const SAVE_VERSION := 2
@@ -54,6 +55,7 @@ class Nation:
 	var researched := {}          # tech id -> true
 	var researching := ""
 	var research_progress := 0.0
+	var research_options: Array = []   # current draw of pickable techs
 	var age := 1
 	var perks: Array = []
 	var pending_perks: Array = [] # offered perk ids awaiting a pick
@@ -229,6 +231,9 @@ func setup() -> void:
 			spawn_unit(i, "warrior", spawns[i])
 			spawn_unit(i, "scout", spawns[i])
 			spawn_unit(i, "settler", spawns[i])
+
+	for i in range(n_players):
+		draw_research_options(i)
 
 	fog.recompute()
 	map_dirty = true
@@ -977,19 +982,159 @@ func spawn_hostiles(n: int, count: int) -> void:
 
 
 # ---------------- research / ages ----------------
+#
+# Research is a DRAW: each nation is offered research_option_count()
+# weighted options (base 3; techs like Writing add more). Weights lean
+# toward the branches the nation is "spec'd into" — its researched-tech
+# history, policies, perks and city specializations.
 
+const BRANCH_IDS := ["agri", "craft", "mil", "com", "sci", "civ"]
+const POLICY_TYPE_BRANCHES := {
+	"economy": {"com": 0.8, "agri": 0.4, "craft": 0.4},
+	"military": {"mil": 1.2},
+	"society": {"civ": 0.8, "sci": 0.4},
+}
+const MOD_KEY_BRANCHES := {
+	"food": "agri", "b:farm": "agri", "b:pasture": "agri", "b:fishery": "agri", "popGrowth": "agri",
+	"materials": "craft", "b:factory": "craft", "buildCost": "craft",
+	"gold": "com", "tradeCap": "com",
+	"science": "sci", "researchOptions": "sci",
+	"influence": "civ", "claimCost": "civ", "borderUpkeep": "civ", "maxPolicies": "civ",
+	"atk": "mil", "def": "mil", "navalAtk": "mil", "unitCost": "mil", "unitUpkeep": "mil",
+}
+const SPEC_BRANCHES := {
+	"breadbasket": "agri", "forgeCity": "craft", "tradeNexus": "com",
+	"scholarHaven": "sci", "holyCity": "civ", "bastion": "mil",
+	"navalBase": "mil", "garrisonCity": "mil", "culturalJewel": "civ", "techHub": "sci",
+}
+
+
+func research_option_count(n: int) -> int:
+	return 3 + nations[n].mod_int("researchOptions")
+
+
+## How strongly this nation leans toward each tech branch (0..1 per branch).
+func branch_affinity(n: int) -> Dictionary:
+	var nat = nations[n]
+	var pts := {}
+	for b in BRANCH_IDS:
+		pts[b] = 0.0
+	for tid: String in nat.researched:
+		pts[Data.techs[tid].branch] += 1.0
+	for pid: String in nat.policies:
+		var per: Dictionary = POLICY_TYPE_BRANCHES.get(Data.policies[pid].type, {})
+		for b2: String in per:
+			pts[b2] += per[b2] * 3.0
+	for perk_id: String in nat.perks:
+		for k: String in Data.perks[perk_id].mod:
+			var b3 = MOD_KEY_BRANCHES.get(k)
+			if b3 != null:
+				pts[b3] += 2.0
+	for c in cities_of(n):
+		if c.spec != "":
+			var b4 = SPEC_BRANCHES.get(c.spec)
+			if b4 != null:
+				pts[b4] += 3.0
+	var mx := 0.0
+	for b5 in BRANCH_IDS:
+		mx = maxf(mx, pts[b5])
+	if mx <= 0.0:
+		return pts
+	for b6 in BRANCH_IDS:
+		pts[b6] = pts[b6] / mx
+	return pts
+
+
+## Draw a fresh weighted offer of research options for this nation.
+func draw_research_options(n: int) -> void:
+	var nat = nations[n]
+	var avail := available_techs(n)
+	if avail.is_empty():
+		nat.research_options = []
+		return
+	var aff := branch_affinity(n)
+	var pool: Array = []   # [tid, weight]
+	for tid: String in avail:
+		var t: Dictionary = Data.techs[tid]
+		var w: float = 1.0 + 2.0 * float(aff[t.branch])
+		if int(t.age) == nat.age:
+			w *= 1.25
+		elif int(t.age) < nat.age:
+			w *= 1.1   # catching up on old techs is slightly encouraged
+		pool.append([tid, w])
+	var count := mini(research_option_count(n), pool.size())
+	var picked: Array = []
+	for k in range(count):
+		var total := 0.0
+		for pr: Array in pool:
+			total += pr[1]
+		var r := rng.randf() * total
+		for i in range(pool.size()):
+			r -= pool[i][1]
+			if r <= 0.0:
+				picked.append(pool[i][0])
+				pool.remove_at(i)
+				break
+	nat.research_options = picked
+	if nat.is_human:
+		research_offer.emit(n)
+
+
+## Player/AI picks one of the offered options.
+func pick_research(n: int, tid: String) -> bool:
+	var nat = nations[n]
+	if not nat.research_options.has(tid) or not tech_available(n, tid):
+		return false
+	nat.researching = tid
+	nat.research_options = []
+	notify(n, "Research began: %s" % Data.techs[tid].name)
+	return true
+
+
+func reroll_cost(n: int) -> float:
+	return 8.0 + 4.0 * float(nations[n].age)
+
+
+func reroll_research(n: int) -> String:
+	var nat = nations[n]
+	var cost := reroll_cost(n)
+	if nat.res.influence < cost:
+		return "Not enough Influence (%d)." % int(cost)
+	nat.res.influence -= cost
+	draw_research_options(n)
+	return ""
+
+
+## Debug/test helper — bypasses the draw (still respects prerequisites).
 func set_research(n: int, tid: String) -> void:
 	if tech_available(n, tid):
 		nations[n].researching = tid
+		nations[n].research_options = []
 
 
 func _auto_pick_research(n: int) -> void:
-	var avail := available_techs(n)
-	if avail.is_empty():
+	var nat = nations[n]
+	if nat.research_options.is_empty():
+		draw_research_options(n)
+	if nat.research_options.is_empty():
 		return
-	avail.sort_custom(func(a, b): return Data.techs[a].cost < Data.techs[b].cost)
-	nations[n].researching = avail[0]
-	notify(n, "Research began: %s" % Data.techs[avail[0]].name)
+	# AI: personality-weighted choice among the drawn options
+	var best := ""
+	var best_w := -1.0
+	for tid: String in nat.research_options:
+		var t: Dictionary = Data.techs[tid]
+		var w := 1.0
+		if t.branch == "mil":
+			w *= 0.7 + nat.ai_aggression
+		elif t.branch == "civ" or t.branch == "agri":
+			w *= 0.7 + nat.ai_expansion
+		# cheaper options finish sooner — AIs value momentum
+		w *= sqrt(60.0 / maxf(20.0, float(t.cost)))
+		w *= rng.randf_range(0.8, 1.2)
+		if w > best_w:
+			best_w = w
+			best = tid
+	pick_research(n, best)
 
 
 func _complete_tech(n: int, tid: String) -> void:
@@ -1000,6 +1145,7 @@ func _complete_tech(n: int, tid: String) -> void:
 	nat.mods_dirty = true
 	var t: Dictionary = Data.techs[tid]
 	notify(n, "Research complete: %s" % t.name, "good")
+	draw_research_options(n)
 	if t.flag != null and t.flag.has("revealMap"):
 		fog.reveal_all(n)
 		map_dirty = true
@@ -1286,9 +1432,11 @@ func _economy_tick(n: int) -> void:
 	if nat.researching == "" and not nat.is_human:
 		_auto_pick_research(n)
 	elif nat.researching == "" and nat.is_human:
+		if nat.research_options.is_empty():
+			draw_research_options(n)
 		if not nat.has_meta("nagged_research"):
 			nat.set_meta("nagged_research", true)
-			notify(n, "Choose a technology to research (Tech button).", "warn")
+			notify(n, "Your scholars await direction — pick a research option.", "warn")
 	elif nat.researching != "" and nat.is_human:
 		nat.remove_meta("nagged_research")
 	nat.research_progress += income.science
@@ -1611,6 +1759,7 @@ func save_game() -> void:
 	for nat in nations:
 		data.nations.append({"id": nat.id, "alive": nat.alive, "capital": nat.capital_tile,
 			"res": nat.res, "researched": nat.researched.keys(), "researching": nat.researching,
+			"options": nat.research_options,
 			"progress": nat.research_progress, "age": nat.age, "perks": nat.perks,
 			"pending_perks": nat.pending_perks, "policies": nat.policies,
 			"temp_mods": nat.temp_mods, "ww": nat.war_weariness, "ark": nat.ark_stages,
@@ -1677,6 +1826,7 @@ func setup_from_save(data: Dictionary) -> void:
 		for tid in nd.researched:
 			nat.researched[tid] = true
 		nat.researching = nd.researching
+		nat.research_options = nd.get("options", [])
 		nat.research_progress = float(nd.progress)
 		nat.age = int(nd.age)
 		nat.perks = nd.perks

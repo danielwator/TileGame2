@@ -43,12 +43,22 @@ func setup(m) -> void:
 	v.add_theme_constant_override("separation", 10)
 	panel.add_child(v)
 
-	var title := Label.new()
-	title.text = "A E O N S"
-	title.add_theme_font_size_override("font_size", 40)
-	title.add_theme_color_override("font_color", Color(0.91, 0.76, 0.35))
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	v.add_child(title)
+	# logo art placeholder (drop assets/icons/logo.png to replace the text title)
+	if ResourceLoader.exists("res://assets/icons/logo.png"):
+		var logo := TextureRect.new()
+		logo.texture = load("res://assets/icons/logo.png")
+		logo.custom_minimum_size = Vector2(0, 96)
+		logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		v.add_child(logo)
+	else:
+		var title := Label.new()
+		title.text = "A E O N S"
+		title.add_theme_font_size_override("font_size", 40)
+		title.add_theme_color_override("font_color", Color(0.91, 0.76, 0.35))
+		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		title.tooltip_text = "logo placeholder: assets/icons/logo.png"
+		v.add_child(title)
 	var tag := Label.new()
 	tag.text = "one planet  •  eight ages  •  every age a war for tomorrow"
 	tag.add_theme_color_override("font_color", Color(0.55, 0.6, 0.68))

@@ -295,12 +295,30 @@ func _run_selftest() -> void:
 	var hu: int = g.human_id
 	var nat = g.nations[hu]
 
-	# --- research (branch-starter has no prereqs) ---
-	g.set_research(hu, "hunting")
-	_check("research selectable", nat.researching == "hunting")
+	# --- research draw: 3 weighted options, pick one ---
+	_check("research offer drawn (3 options)", nat.research_options.size() == 3)
+	var offered: Array = nat.research_options.duplicate()
+	_check("offered techs are all available",
+		offered.all(func(tid): return g.tech_available(hu, tid)))
+	var picked_tid: String = offered[0]
+	_check("picking an offered tech works",
+		g.pick_research(hu, picked_tid) and nat.researching == picked_tid)
+	_check("offer cleared after picking", nat.research_options.is_empty())
+	# reroll draws a new offer and costs influence
+	nat.researching = ""
+	g.draw_research_options(hu)
+	nat.res.influence = 100.0
+	var inf0: float = nat.res.influence
+	_check("reroll redraws and charges influence",
+		g.reroll_research(hu) == "" and nat.res.influence < inf0 and nat.research_options.size() == 3)
+	# affinity: a military-heavy nation weights the mil branch highest
+	for tid2 in ["warbands", "archery", "spearcraft", "palisades"]:
+		nat.researched[tid2] = true
+	var aff: Dictionary = g.branch_affinity(hu)
+	_check("branch affinity leans toward researched branches", aff["mil"] >= aff["com"])
 	# grant a starter tech set so build/train/policy paths can be exercised
-	for tid in ["hunting", "agriculture", "warbands", "tribalCouncil", "masonry", "bronzeWorking"]:
-		nat.researched[tid] = true
+	for tid3 in ["hunting", "agriculture", "warbands", "tribalCouncil", "masonry", "bronzeWorking"]:
+		nat.researched[tid3] = true
 	nat.mods_dirty = true
 
 	# --- settler founds a city ---
@@ -439,11 +457,11 @@ func _run_selftest() -> void:
 	_check("save/load restores cities", loaded != null and loaded.cities.size() == g.cities.size())
 	_check("save/load restores research", loaded != null and loaded.nations[hu].researching == g.nations[hu].researching)
 
-	# --- long-run stability: 400 ticks, no crash ---
+	# --- long-run stability: 500 ticks, no crash ---
 	var ok := true
-	for t in range(400):
+	for t in range(500):
 		g._do_tick()
-	_check("400-tick long run completed", ok)
+	_check("500-tick long run completed", ok)
 	var any_age2 := false
 	for n2 in g.nations:
 		if n2.age >= 2:

@@ -5,6 +5,19 @@
 'use strict';
 window.CHANGELOG = [
   {
+    version: '0.5.0',
+    date: '2026-07-12',
+    title: 'The old world returns + research draws',
+    changes: [
+      'WORLD GENERATION replaced with a faithful port of the original TileGame project\'s generator: 1024×512 equirect grid, domain-warped tectonic plates, ridged elevation, ITCZ/Hadley moisture with tectonic rain shadows, 25 tile types (jungles, mangroves, coral reefs, salt flats, alpine meadows…), lake filling/smoothing, tiny-island culling, coastal shallow strips, and meandering rivers routed over depression-filled elevation. The globe uses the original palette with per-pixel field re-classification — the old game\'s exact look.',
+      'Gameplay layers were kept: district tiles now derive their 8 slots from the composition of the ported grid beneath them; old tile types map onto the existing biome data (rivers count as fertile floodplains and boost settlement odds).',
+      'RESEARCH is now a weighted DRAW: pick from a hand of 3 options (Writing, Scientific Method and Computers each add +1). Weights lean toward the branches you are spec\'d into — researched history, policies, perks and city specializations all pull their branch, and current-age techs appear more often. Reroll the hand for Influence (cost scales with age). The tech tree screen highlights the current hand in gold; AIs pick from their own draws by personality.',
+      'UI: new research chooser cards with branch colors; image placeholder system across the whole interface (top-bar resources, tech cards, biome headers, buildings, events, perks, city portrait, menu logo) — drop PNGs into game/assets/icons/ (see its README) and they replace the placeholders automatically.',
+      'Menu: ocean-coverage slider now drives the generator\'s sea level; terrain detail option removed (the shader is resolution-independent).',
+      'Self-test grown to 26 checks (research draw, affinity weighting, reroll costs).',
+    ],
+  },
+  {
     version: '0.4.0',
     date: '2026-07-12',
     title: 'Districts, per-pixel terrain & the planet look',

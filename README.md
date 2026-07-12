@@ -39,12 +39,18 @@ index.html + src/    the original browser prototype (kept for reference)
 tools/               Godot editor binaries
 ```
 
-**Terrain is independent of the tile grid**: climate and plates are simulated on a
-medium geodesic field (3× the tile frequency), barycentrically interpolated onto a much
-denser render mesh (6×–15× the tile frequency, default 12× ≈ 576k vertices, generated
-across all CPU cores), and finished by a **per-fragment shader** that classifies biomes
-per pixel — coastlines and biome borders stay crisp at any zoom. Gameplay runs on a
-coarser Goldberg hex/pentagon tile layer (2,562 / 4,002 / 5,762 tiles).
+**World generation** is a faithful GDScript port of the original TileGame project's
+generator: a seeded 1024×512 equirect grid with domain-warped tectonic plates, ridged
+elevation, ITCZ/Hadley moisture with tectonic rain shadows, 25 Whittaker tile types,
+lake filling, island culling, coastal shallows, and rivers routed over depression-filled
+elevation. The globe re-classifies the fields **per pixel** with the original palette,
+so coastlines stay crisp at any zoom. Gameplay runs on an independent Goldberg
+hex/pentagon tile layer (2,562 / 4,002 / 5,762 tiles) sampling the grid beneath it.
+
+**Research** is a weighted draw: pick from a hand of 3+ options, weighted toward the
+branches your empire is spec'd into (research history, policies, perks, city
+specializations); reroll for Influence. **Icons**: the UI renders placeholder boxes —
+drop PNGs into `game/assets/icons/` (see its README) to replace them.
 
 **Districts**: each tile carries **8 building slots** apportioned from the biome mix it
 spans (70% forest / 20% ocean / 10% desert → 5 forest + 2 ocean + 1 desert slots). Slots
