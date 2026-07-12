@@ -53,7 +53,7 @@ func setup(m) -> void:
 		v.add_child(logo)
 	else:
 		var title := Label.new()
-		title.text = "A E O N S"
+		title.text = "TILEGAME 2"
 		title.add_theme_font_size_override("font_size", 40)
 		title.add_theme_color_override("font_color", Color(0.91, 0.76, 0.35))
 		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

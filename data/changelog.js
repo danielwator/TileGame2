@@ -5,6 +5,17 @@
 'use strict';
 window.CHANGELOG = [
   {
+    version: '0.6.0',
+    date: '2026-07-12',
+    title: 'TileGame2: slower pace, uniform eras',
+    changes: [
+      'The game is now called TileGame2 (launcher renamed to TileGame2.bat).',
+      'Pacing slowed: one simulation tick every 2.4 seconds at 1× (was 1.2 s) — use 2×/4× when you want history to hurry.',
+      'The calendar no longer imitates real-world history: it starts at Year 1 and advances a uniform 1 year per tick in every era (no more era-dependent tick timing). Eras remain research-gated at 20 techs each, so every era is roughly the same length.',
+      'Age data dropped its historical start-years; the Score victory deadline is now year 4000 on the uniform calendar.',
+    ],
+  },
+  {
     version: '0.5.0',
     date: '2026-07-12',
     title: 'The old world returns + research draws',

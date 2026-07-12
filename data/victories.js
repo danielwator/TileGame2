@@ -25,8 +25,8 @@ window.VICTORIES = {
   },
   score: {
     id: 'score', name: 'Score Victory', icon: '🏆',
-    desc: 'If no one has won by the year 2200, the nation with the highest score takes the crown of history. Score = population x3 + tiles x1 + techs x5 + buildings x2 + gold/100.',
-    check: 'Highest score at year 2200.',
+    desc: 'If no one has won by year 4000 (the calendar is uniform: 1 year per tick, every era), the nation with the highest score takes the crown of history. Score = population x3 + tiles x1 + techs x5 + buildings x2 + gold/100.',
+    check: 'Highest score at year 4000.',
   },
 };
 window.VICTORY_LIST = Object.values(window.VICTORIES);

@@ -1,14 +1,18 @@
-# AEONS
+# TileGame2
 
 A globe-spanning grand-strategy game: one procedurally generated planet, eight ages
 (Ancient → Near Future), ~290 technologies, influence-driven borders, war, diplomacy,
 trade, fog of war and five victory conditions — built in **Godot 4.4**.
 
-![engine](https://img.shields.io/badge/engine-Godot%204.4-478cbf) ![status](https://img.shields.io/badge/version-0.2.0-e8c15a)
+![engine](https://img.shields.io/badge/engine-Godot%204.4-478cbf) ![status](https://img.shields.io/badge/version-0.6.0-e8c15a)
+
+Eras are equal-length and research-gated; the calendar is uniform (1 year per tick in
+every era) and the pace is deliberately unhurried — use the 2×/4× speed buttons when
+you want history to move faster.
 
 ## Play
 
-**Double-click `AEONS.bat`** (or open the `game/` folder with Godot 4.4+ and press Run).
+**Double-click `TileGame2.bat`** (or open the `game/` folder with Godot 4.4+ and press Run).
 
 - Drag to rotate the globe, mouse-wheel to zoom, WASD/arrows to pan, Q/E zoom
 - **Left-click** selects a tile (panels open for claiming, building, cities, units)
@@ -26,7 +30,7 @@ the game uses, so it can never drift out of date.
 ## Architecture
 
 ```
-AEONS.bat            launcher
+TileGame2.bat        launcher
 game/                Godot 4.4 project
   data/gamedata.json all game content (generated from data/*.js)
   scripts/core/      seeded worldgen: plates, climate, biomes; sphere grids
@@ -72,6 +76,6 @@ set AEONS_TEST=1 & tools\Godot_v4.4.1-stable_win64_console.exe --headless --path
 runs a 19-check integration suite (founding, claiming, building, training, combat,
 fog, trade, policies, save/load, 400-tick stability).
 
-Other dev env vars: `AEONS_SEED` (quick-start, skip menu), `AEONS_SIM=<n>` (run n ticks
-at startup), `AEONS_SNAP=<path>` (screenshot), `AEONS_UI=tech|diplo|policy`,
-`AEONS_QUIT=1`.
+Other dev env vars (still `AEONS_`-prefixed for compatibility): `AEONS_SEED`
+(quick-start, skip menu), `AEONS_SIM=<n>` (run n ticks at startup),
+`AEONS_SNAP=<path>` (screenshot), `AEONS_UI=tech|diplo|policy`, `AEONS_QUIT=1`.

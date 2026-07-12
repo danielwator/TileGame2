@@ -216,8 +216,7 @@ func tick_update(delta: float) -> void:
 	else:
 		_research_btn.text = "Sci: (+%.1f banked)" % income.get("science", 0.0)
 	var age_def: Dictionary = Data.age_by_id[nat.age]
-	var yr := int(absf(game.year))
-	_age_label.text = "%s  •  %d %s" % [age_def.short, yr, "BC" if game.year < 0 else "AD"]
+	_age_label.text = "%s  •  Year %d" % [age_def.short, int(game.year)]
 	# refresh open panels
 	if _tile_panel.visible:
 		_refresh_tile_panel()
@@ -1040,7 +1039,7 @@ func _try_alliance(n: int) -> void:
 # ---------- pause menu ----------
 
 func _open_pause_menu() -> void:
-	var v := _new_window("AEONS", Vector2(340, 320))
+	var v := _new_window("TILEGAME 2", Vector2(340, 320))
 	_btn(v, "Resume", _close_window)
 	_btn(v, "Save Game", func() -> void:
 		game.save_game()

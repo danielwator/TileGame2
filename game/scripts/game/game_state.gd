@@ -15,7 +15,12 @@ signal research_offer(nation_id: int)
 signal victory(nation_id: int, victory_id: String)
 
 const SAVE_VERSION := 2
-const TICK_SECONDS := 1.2
+# real-time pace: one simulation tick every 2.4 s at 1x speed
+const TICK_SECONDS := 2.4
+# uniform abstract calendar: every tick advances the same number of years
+# regardless of era (eras are equal-length in ticks, gated purely by research)
+const YEARS_PER_TICK := 1.0
+const SCORE_VICTORY_YEAR := 4000.0
 const WORK_RADIUS := 3
 const CITY_MIN_DIST := 4
 const CAPITAL_WEIGHT := 0.6
@@ -175,7 +180,7 @@ var ai
 var tick_count := 0
 var speed := 1.0                    # 0 = paused
 var _accum := 0.0
-var year := -4000.0
+var year := 1.0
 var map_dirty := true
 var over := false
 var winner := -1
@@ -1273,7 +1278,7 @@ func update(delta: float) -> void:
 
 func _do_tick() -> void:
 	tick_count += 1
-	year += float(Data.age_by_id[nations[human_id].age].yearsPerTick)
+	year += YEARS_PER_TICK
 
 	for n in range(nations.size()):
 		if nations[n].alive:
@@ -1701,8 +1706,8 @@ func _check_victory() -> void:
 		if owned_land >= int(land_total * 0.4):
 			_win(nat.id, "hegemony")
 			return
-	# score victory at year 2200
-	if year >= 2200.0:
+	# score victory at the calendar cap
+	if year >= SCORE_VICTORY_YEAR:
 		var best := -1
 		var best_s := -1.0
 		for nat in nations:

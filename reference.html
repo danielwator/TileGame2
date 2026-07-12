@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AEONS — Game Reference</title>
+<title>TileGame2 — Game Reference</title>
 
 <!-- ── Single source of truth: the same authored data the Godot game uses ──
      game/data/gamedata.json is generated from these files (see Changelog). -->
@@ -95,7 +95,7 @@ table.data tr:hover td{background:#111a2b}
 
 <header>
   <div class="hrow">
-    <span class="logo">AEONS <small>game reference &amp; wiki</small></span>
+    <span class="logo">TILEGAME2 <small>game reference &amp; wiki</small></span>
     <div class="search"><input id="q" type="search" placeholder="Search technologies, buildings, units, events…" autocomplete="off"></div>
   </div>
   <div class="tabs" id="tabs"></div>
@@ -159,7 +159,7 @@ const RENDER = {
   overview(){
     const v=el('div');
     v.appendChild(el('div','sec-intro',
-      `<b>AEONS</b> is a single-planet grand-strategy game played on a tile-covered globe. `+
+      `<b>TileGame2</b> is a single-planet grand-strategy game played on a tile-covered globe. `+
       `A seeded, parametric world generator builds each planet from tectonic plates, latitude-driven `+
       `climate, wind-advected moisture and a Whittaker biome model, then lays an independent hex/pentagon `+
       `tile grid over the high-resolution terrain field. Lead one nation from the <b>Ancient Age</b> to the `+
@@ -189,15 +189,15 @@ const RENDER = {
 
   ages(){
     const v=el('div');
-    v.appendChild(el('div','sec-intro','A nation advances to the next age after researching a threshold number of its current age\'s technologies, then picks 1 of 3 offered <b>perks</b>. Later ages tick faster in game-years.'));
-    for(const a of AGES){
+    v.appendChild(el('div','sec-intro','A nation advances to the next age after researching a threshold number of its current age\'s technologies, then picks 1 of 3 offered <b>perks</b> — so every era is roughly the same length. The calendar is abstract and uniform: <b>1 year per tick in every era</b>, starting at Year 1 (no real-world dates).'));
+    AGES.forEach((a,i)=>{
       const c=el('div','card');
       c.style.borderLeft=`3px solid ${a.color}`;
-      c.innerHTML=`<h3>${esc(a.name)} <span class="era-pill">${a.startYear<0?(-a.startYear+' BC'):(a.startYear+' AD')}</span></h3>
+      c.innerHTML=`<h3>${esc(a.name)} <span class="era-pill">era ${i+1} of ${AGES.length}</span></h3>
         <div class="desc">${esc(a.desc)}</div>
-        <div class="chips">${chip('advance after '+a.techsToAdvance+' techs')}${chip(a.yearsPerTick+' yrs / tick','sci')}</div>`;
+        <div class="chips">${chip(a.techsToAdvance>100?'final era':'advance after '+a.techsToAdvance+' techs')}</div>`;
       v.appendChild(c);
-    }
+    });
     return v;
   },
 
@@ -431,7 +431,7 @@ const RENDER = {
       ['Combat','Attacker strength vs. defender strength with terrain defense, experience, anti-cavalry bonuses and ranged (no counter-attack). Siege units deal multiplied damage to city defenses; only melee/cavalry can capture a fallen city. Armies heal in friendly territory.'],
       ['Diplomacy','Pairwise relations drift with shared borders, age parity, alliances and wars. Statuses: peace, non-aggression pact, alliance, war. Trade deals yield Gold to both sides (capacity set by tech). Declaring war on a nation pulls in its defensive allies.'],
       ['Research Draw','Research is chosen from a <b>drawn hand of options</b> (base 3; Writing, Scientific Method and Computers each add +1). The draw is weighted toward the branches your nation is <b>spec\'d into</b>: your researched-tech history, active policies (military policies pull Military techs…), perks and city specializations all raise their branch\'s weight, and current-age techs appear more often. You may reroll the hand for Influence (cost scales with age). Science accrues even while no research is selected (banked toward the next pick). The full tech tree screen shows the current hand highlighted in gold.'],
-      ['Ages &amp; Perks','Advancing an age requires researching a threshold of that age\'s techs, then choosing 1 of 3 perks. Later ages advance the calendar faster.'],
+      ['Ages &amp; Perks','Advancing an age requires researching a threshold of that age\'s techs, then choosing 1 of 3 perks. Eras are equal-length by design and the calendar is uniform — 1 year per tick in every era; a Score victory is judged if no one has won by year 4000.'],
       ['Random Events','Per-tick chance of a boon or bane, weighted and era-scaled, some conditional (at war, coastal, owns a biome/building/deposit) and some offering a choice. Nation perks and some techs improve event luck.'],
     ];
     for(const [t,d] of M){

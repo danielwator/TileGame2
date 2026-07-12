@@ -4,8 +4,6 @@
    "id": 1,
    "name": "Ancient Age",
    "short": "Ancient",
-   "startYear": -4000,
-   "yearsPerTick": 10,
    "techsToAdvance": 20,
    "color": "#c9a45f",
    "desc": "First fires, first fields, first walls. Everything is undiscovered and every neighbor is a stranger."
@@ -14,8 +12,6 @@
    "id": 2,
    "name": "Classical Age",
    "short": "Classical",
-   "startYear": -700,
-   "yearsPerTick": 8,
    "techsToAdvance": 20,
    "color": "#d8d0b0",
    "desc": "Philosophy, currency and organized legions. Civilizations begin to see — and covet — one another."
@@ -24,8 +20,6 @@
    "id": 3,
    "name": "Medieval Age",
    "short": "Medieval",
-   "startYear": 500,
-   "yearsPerTick": 6,
    "techsToAdvance": 20,
    "color": "#8f9bb5",
    "desc": "Castles, guilds and crusades. Faith and steel decide the fate of kingdoms."
@@ -34,8 +28,6 @@
    "id": 4,
    "name": "Renaissance Age",
    "short": "Renaissance",
-   "startYear": 1400,
-   "yearsPerTick": 4,
    "techsToAdvance": 20,
    "color": "#c98fd0",
    "desc": "Printing, gunpowder and tall ships. The whole globe is suddenly within reach."
@@ -44,8 +36,6 @@
    "id": 5,
    "name": "Industrial Age",
    "short": "Industrial",
-   "startYear": 1750,
-   "yearsPerTick": 2,
    "techsToAdvance": 20,
    "color": "#a0762e",
    "desc": "Coal smoke over iron rails. Production explodes — and so does the cost of falling behind."
@@ -54,8 +44,6 @@
    "id": 6,
    "name": "Modern Age",
    "short": "Modern",
-   "startYear": 1900,
-   "yearsPerTick": 1,
    "techsToAdvance": 20,
    "color": "#5e8fce",
    "desc": "Oil, flight and total war. The world shrinks to a chessboard."
@@ -64,8 +52,6 @@
    "id": 7,
    "name": "Information Age",
    "short": "Information",
-   "startYear": 1980,
-   "yearsPerTick": 0.5,
    "techsToAdvance": 20,
    "color": "#5ecfa0",
    "desc": "Silicon minds and instant signals. Circuits become as strategic as steel once was."
@@ -74,8 +60,6 @@
    "id": 8,
    "name": "Near Future",
    "short": "Near Future",
-   "startYear": 2030,
-   "yearsPerTick": 0.5,
    "techsToAdvance": 999,
    "color": "#ce5e8f",
    "desc": "Fusion, arcologies and the first steps beyond the cradle. The endgame begins."
@@ -1162,13 +1146,12 @@
     "herbalism"
    ],
    "mod": {
-    "science": 0.1,
-    "researchOptions": 1
+    "science": 0.1
    },
    "flag": null,
    "unlockB": null,
    "unlockU": null,
-   "desc": "Memory outsourced to clay. Everything changes. +1 research option to choose from."
+   "desc": "Memory outsourced to clay. Everything changes."
   },
   {
    "id": "sailing",
@@ -2968,13 +2951,12 @@
     "papermaking"
    ],
    "mod": {
-    "science": 0.15,
-    "researchOptions": 1
+    "science": 0.15
    },
    "flag": null,
    "unlockB": null,
    "unlockU": null,
-   "desc": "Test it or toss it. +1 research option to choose from."
+   "desc": "Test it or toss it."
   },
   {
    "id": "heliocentrism",
@@ -4845,15 +4827,14 @@
     "publicHealth"
    ],
    "mod": {
-    "science": 0.15,
-    "researchOptions": 1
+    "science": 0.15
    },
    "flag": null,
    "unlockB": [
     "dataCenter"
    ],
    "unlockU": null,
-   "desc": "Arithmetic at the speed of light. +1 research option to choose from."
+   "desc": "Arithmetic at the speed of light."
   },
   {
    "id": "internet",
@@ -10344,11 +10325,22 @@
    "id": "score",
    "name": "Score Victory",
    "icon": "🏆",
-   "desc": "If no one has won by the year 2200, the nation with the highest score takes the crown of history. Score = population x3 + tiles x1 + techs x5 + buildings x2 + gold/100.",
-   "check": "Highest score at year 2200."
+   "desc": "If no one has won by year 4000 (the calendar is uniform: 1 year per tick, every era), the nation with the highest score takes the crown of history. Score = population x3 + tiles x1 + techs x5 + buildings x2 + gold/100.",
+   "check": "Highest score at year 4000."
   }
  },
  "changelog": [
+  {
+   "version": "0.6.0",
+   "date": "2026-07-12",
+   "title": "TileGame2: slower pace, uniform eras",
+   "changes": [
+    "The game is now called TileGame2 (launcher renamed to TileGame2.bat).",
+    "Pacing slowed: one simulation tick every 2.4 seconds at 1× (was 1.2 s) — use 2×/4× when you want history to hurry.",
+    "The calendar no longer imitates real-world history: it starts at Year 1 and advances a uniform 1 year per tick in every era (no more era-dependent tick timing). Eras remain research-gated at 20 techs each, so every era is roughly the same length.",
+    "Age data dropped its historical start-years; the Score victory deadline is now year 4000 on the uniform calendar."
+   ]
+  },
   {
    "version": "0.5.0",
    "date": "2026-07-12",
