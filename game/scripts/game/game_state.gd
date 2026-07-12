@@ -13,6 +13,7 @@ signal event_popup(nation_id: int, ev: Dictionary, has_choice: bool)
 signal perk_offer(nation_id: int)
 signal victory(nation_id: int, victory_id: String)
 
+const SAVE_VERSION := 2
 const TICK_SECONDS := 1.2
 const WORK_RADIUS := 3
 const CITY_MIN_DIST := 4
@@ -154,7 +155,11 @@ var nations: Array = []
 var human_id := 0
 var owner: PackedInt32Array
 var tile_city: PackedInt32Array     # tile -> city id (-1)
-var buildings: Array = []           # per tile: null | {id, city, progress, time, done}
+# per tile: null | Array[SLOTS] of (null | {id, city, progress, time, done}).
+# Slot k's allowed buildings depend on slot k's biome (world.t_slots) — a tile
+# spanning several biomes offers a mix of slot types (Stellaris-style districts)
+var buildings: Array = []
+var built_index := {}               # city_id -> {building_id: done count}
 var deposit: Array = []             # per tile deposit id or ""
 var cities: Array = []
 var units: Array = []
@@ -275,21 +280,86 @@ func city_at(tile: int):
 	return null
 
 
+# ---------------- district slots ----------------
+
+func slots_per_tile() -> int:
+	return int(world.slots_per_tile)
+
+
+func slot_biome(t: int, s: int) -> String:
+	return Data.biome_order[world.t_slots[t][s]]
+
+
+## slot array for a tile, creating it lazily
+func _ensure_slots(t: int) -> Array:
+	if buildings[t] == null:
+		var arr: Array = []
+		arr.resize(slots_per_tile())
+		buildings[t] = arr
+	return buildings[t]
+
+
+func slot_building(t: int, s: int):
+	var arr = buildings[t]
+	return null if arr == null else arr[s]
+
+
+## every non-null slot entry on a tile
+func tile_buildings(t: int) -> Array:
+	var out: Array = []
+	var arr = buildings[t]
+	if arr != null:
+		for b in arr:
+			if b != null:
+				out.append(b)
+	return out
+
+
+func tile_built_count(t: int) -> int:
+	return tile_buildings(t).size()
+
+
+func _index_add(city_id: int, bid: String, delta: int) -> void:
+	if not built_index.has(city_id):
+		built_index[city_id] = {}
+	var m: Dictionary = built_index[city_id]
+	m[bid] = int(m.get(bid, 0)) + delta
+	if m[bid] <= 0:
+		m.erase(bid)
+
+
+func city_built_count(city_id: int, bid: String) -> int:
+	return int(built_index.get(city_id, {}).get(bid, 0))
+
+
+func nation_has_built(n: int, bid: String) -> bool:
+	for c in cities:
+		if c.nation_id == n and city_built_count(c.id, bid) > 0:
+			return true
+	return false
+
+
+func _rebuild_built_index() -> void:
+	built_index = {}
+	for t in range(world.NT):
+		for b in tile_buildings(t):
+			if b.done:
+				_index_add(int(b.city), b.id, 1)
+
+
 func city_max_pop(c) -> int:
 	var cap := 5
-	for t in range(world.NT):
-		var b = buildings[t]
-		if b != null and b.done and b.city == c.id:
-			cap += int(Data.buildings[b.id].housing)
+	var m: Dictionary = built_index.get(c.id, {})
+	for bid: String in m:
+		cap += int(Data.buildings[bid].housing) * int(m[bid])
 	return cap
 
 
 func city_defense(c) -> float:
 	var d := 10.0
-	for t in range(world.NT):
-		var b = buildings[t]
-		if b != null and b.done and b.city == c.id:
-			d += float(Data.buildings[b.id].defense)
+	var m: Dictionary = built_index.get(c.id, {})
+	for bid: String in m:
+		d += float(Data.buildings[bid].defense) * int(m[bid])
 	return d * (1.0 + c.spec_mod("cityDefense") + nations[c.nation_id].modv("def"))
 
 
@@ -349,9 +419,13 @@ func nation_has_deposit(n: int, dep_id: String) -> bool:
 func overlay_color(ti: int) -> Color:
 	var st := fog_state(human_id, ti)
 	if st == 0:
-		return Color(0.013, 0.02, 0.038, 1.0)
+		# unexplored reads as a dark slate planet surface, not a void:
+		# per-tile brightness variation gives it a faint mapped-parchment feel
+		var v := float((ti * 2654435761) % 997) / 997.0
+		var g := 0.055 + v * 0.03
+		return Color(g * 0.85, g * 1.0, g * 1.5, 0.97)
 	if st == 1:
-		var c := Color(0.01, 0.015, 0.03, 0.55)
+		var c := Color(0.01, 0.015, 0.03, 0.5)
 		var o := owner[ti]
 		if o >= 0:
 			var oc: Color = nations[o].color
@@ -395,7 +469,16 @@ func found_city(n: int, tile: int, free := false):
 		nations[n].capital_tile = tile
 	owner[tile] = n
 	tile_city[tile] = c.id
-	buildings[tile] = {"id": "cityCenter", "city": c.id, "progress": 0, "time": 0, "done": true}
+	# the city center occupies the tile's best settleable slot
+	var arr := _ensure_slots(tile)
+	var center_slot := 0
+	for s in range(slots_per_tile()):
+		var bio: Dictionary = Data.biomes[slot_biome(tile, s)]
+		if not bio.water and bio.allowsCity:
+			center_slot = s
+			break
+	arr[center_slot] = {"id": "cityCenter", "city": c.id, "progress": 0, "time": 0, "done": true}
+	_index_add(c.id, "cityCenter", 1)
 	var tiles: Dictionary = world.tiles
 	for e in range(tiles.nbr_off[tile], tiles.nbr_off[tile + 1]):
 		var nb: int = tiles.nbr[e]
@@ -514,8 +597,10 @@ func _decay_border(n: int) -> void:
 			worst = i
 	if worst >= 0:
 		owner[worst] = -1
-		if buildings[worst] != null:
-			buildings[worst] = null
+		for b in tile_buildings(worst):
+			if b.done:
+				_index_add(int(b.city), b.id, -1)
+		buildings[worst] = null
 		tile_city[worst] = -1
 		map_dirty = true
 		notify(n, "Border tile lost — influence upkeep unpaid!", "warn")
@@ -523,24 +608,29 @@ func _decay_border(n: int) -> void:
 
 # ---------------- buildings ----------------
 
-func can_build(n: int, tile: int, bid: String) -> String:
+## Can `bid` be built in slot `slot` of `tile`? "" if yes, else the reason.
+## Rules depend on the SLOT's biome: a tile spanning forest + coast offers
+## forest slots (lumber camps...) and coast slots (fisheries, ports...).
+func can_build(n: int, tile: int, slot: int, bid: String) -> String:
 	var bdef: Dictionary = Data.buildings[bid]
 	if owner[tile] != n:
 		return "Not your territory."
-	if buildings[tile] != null:
-		return "Tile already developed."
 	if tile_city[tile] == -1:
 		return "Too far from a city."
+	if slot < 0 or slot >= slots_per_tile():
+		return "Invalid slot."
+	if slot_building(tile, slot) != null:
+		return "Slot already developed."
 	var nat = nations[n]
 	if bdef.tech != null and not nat.researched.has(bdef.tech):
 		return "Requires %s." % Data.techs[bdef.tech].name
-	# biome placement
-	var bio: String = world.t_biome[tile]
+	# slot-biome placement
+	var bio: String = slot_biome(tile, slot)
 	var place: Dictionary = bdef.place
 	var on = place.get("on")
 	var allowed := false
 	if on is String and on == "land":
-		allowed = world.t_land[tile] == 1 and bio != "iceCap" and bio != "mountain" and bio != "wetland"
+		allowed = not Data.biomes[bio].water and bio != "iceCap" and bio != "mountain" and bio != "wetland"
 		if bio == "mountain" and nat.has_flag("mountainPass"):
 			allowed = true
 		if bio == "wetland" and nat.has_flag("buildOnWetland"):
@@ -548,26 +638,30 @@ func can_build(n: int, tile: int, bid: String) -> String:
 	elif on is Array:
 		allowed = on.has(bio)
 	if not allowed:
-		return "Cannot be built on %s." % Data.biomes[bio].name
+		return "Needs a different terrain slot (%s)." % Data.biomes[bio].name
 	# tech-gated biomes
 	if bdef.techFlags != null and bdef.techFlags.has(bio) and not nat.has_flag(bdef.techFlags[bio]):
 		return "Requires %s to build here." % bio
-	if place.get("deposit") != null and deposit[tile] != place.deposit:
-		return "Requires a %s deposit." % Data.deposits[place.deposit].name
+	if place.get("deposit") != null:
+		if deposit[tile] != place.deposit:
+			return "Requires a %s deposit." % Data.deposits[place.deposit].name
+		# one extractor per deposit tile
+		for b in tile_buildings(tile):
+			if b.id == bid:
+				return "The deposit already has an extractor."
 	if bdef.get("requiresNationDeposit") != null and not nation_has_deposit(n, bdef.requiresNationDeposit):
 		return "Requires %s within your borders." % Data.deposits[bdef.requiresNationDeposit].name
 	if bdef.get("equatorial", false) and absf(world.tiles.lat[tile]) > 15.0:
 		return "Must be built within 15° of the equator."
-	# uniqueness
+	# uniqueness (done buildings via index + anything under construction)
 	if bdef.unique != null:
-		for t in range(world.NT):
-			var ob = buildings[t]
-			if ob == null or ob.id != bid:
-				continue
-			if bdef.unique == "nation" and owner[t] == n:
-				return "Already built (one per nation)."
-			if bdef.unique == "city" and ob.city == tile_city[tile]:
+		var cid := tile_city[tile]
+		if bdef.unique == "city":
+			if city_built_count(cid, bid) > 0 or _city_in_progress(cid, bid):
 				return "This city already has one."
+		elif bdef.unique == "nation":
+			if nation_has_built(n, bid) or _nation_in_progress(n, bid):
+				return "Already built (one per nation)."
 	# cost
 	for k: String in bdef.cost:
 		var need: float = bdef.cost[k] * maxf(0.3, 1.0 + nat.modv("buildCost"))
@@ -576,29 +670,78 @@ func can_build(n: int, tile: int, bid: String) -> String:
 	return ""
 
 
-func start_building(n: int, tile: int, bid: String) -> bool:
-	if can_build(n, tile, bid) != "":
+func _city_in_progress(city_id: int, bid: String) -> bool:
+	for t in range(world.NT):
+		if tile_city[t] != city_id:
+			continue
+		for b in tile_buildings(t):
+			if b.id == bid and not b.done:
+				return true
+	return false
+
+
+func _nation_in_progress(n: int, bid: String) -> bool:
+	for t in range(world.NT):
+		if owner[t] != n:
+			continue
+		for b in tile_buildings(t):
+			if b.id == bid and not b.done:
+				return true
+	return false
+
+
+func start_building(n: int, tile: int, slot: int, bid: String) -> bool:
+	if can_build(n, tile, slot, bid) != "":
 		return false
 	var bdef: Dictionary = Data.buildings[bid]
 	var nat = nations[n]
 	for k: String in bdef.cost:
 		nat.res[k] -= bdef.cost[k] * maxf(0.3, 1.0 + nat.modv("buildCost"))
-	buildings[tile] = {"id": bid, "city": tile_city[tile], "progress": 0, "time": int(bdef.time), "done": false}
+	var arr := _ensure_slots(tile)
+	arr[slot] = {"id": bid, "city": tile_city[tile], "progress": 0, "time": int(bdef.time), "done": false}
 	map_dirty = true
 	return true
+
+
+## first slot where `bid` is currently buildable (-1 if none)
+func best_slot_for(n: int, tile: int, bid: String) -> int:
+	for s in range(slots_per_tile()):
+		if can_build(n, tile, s, bid) == "":
+			return s
+	return -1
+
+
+func demolish(n: int, tile: int, slot: int) -> String:
+	if owner[tile] != n:
+		return "Not your territory."
+	var b = slot_building(tile, slot)
+	if b == null:
+		return "Nothing here."
+	if b.id == "cityCenter":
+		return "Cannot demolish a city center."
+	if b.done:
+		_index_add(int(b.city), b.id, -1)
+	buildings[tile][slot] = null
+	map_dirty = true
+	return ""
 
 
 func wreck_random_building(n: int) -> void:
 	var cand: Array = []
 	for t in range(world.NT):
-		var b = buildings[t]
-		if b != null and b.done and b.id != "cityCenter" and owner[t] == n:
-			cand.append(t)
+		if owner[t] != n or buildings[t] == null:
+			continue
+		for s in range(slots_per_tile()):
+			var b = slot_building(t, s)
+			if b != null and b.done and b.id != "cityCenter":
+				cand.append([t, s])
 	if cand.is_empty():
 		return
-	var t2: int = cand[rng.randi_range(0, cand.size() - 1)]
-	notify(n, "%s was destroyed!" % Data.buildings[buildings[t2].id].name, "warn")
-	buildings[t2] = null
+	var pick: Array = cand[rng.randi_range(0, cand.size() - 1)]
+	var wb: Dictionary = buildings[pick[0]][pick[1]]
+	notify(n, "%s was destroyed!" % Data.buildings[wb.id].name, "warn")
+	_index_add(int(wb.city), wb.id, -1)
+	buildings[pick[0]][pick[1]] = null
 	map_dirty = true
 
 
@@ -648,13 +791,10 @@ func spawn_unit(n: int, type: String, tile: int):
 		# barracks / academy experience
 		var cid := tile_city[tile]
 		if cid >= 0:
-			for t in range(world.NT):
-				var b = buildings[t]
-				if b != null and b.done and b.city == cid:
-					if b.id == "barracks":
-						u.exp = maxf(u.exp, 1.25)
-					elif b.id == "militaryAcademy":
-						u.exp = maxf(u.exp, 1.5)
+			if city_built_count(cid, "barracks") > 0:
+				u.exp = maxf(u.exp, 1.25)
+			if city_built_count(cid, "militaryAcademy") > 0:
+				u.exp = maxf(u.exp, 1.5)
 	units.append(u)
 	return u
 
@@ -667,20 +807,11 @@ func unit_cost_ok(n: int, type: String, city) -> String:
 	if d.needs != null and not nation_has_deposit(n, d.needs):
 		return "Requires %s within your borders." % Data.deposits[d.needs].name
 	if d.cls == "naval":
-		var has_port := false
-		for t in range(world.NT):
-			var b = buildings[t]
-			if b != null and b.done and b.city == city.id and (b.id == "port" or b.id == "harbor" or b.id == "shipyard"):
-				has_port = true
-		if not has_port:
+		if city_built_count(city.id, "port") == 0 and city_built_count(city.id, "harbor") == 0 \
+			and city_built_count(city.id, "shipyard") == 0:
 			return "Naval units need a Port in this city."
 	if d.cls == "air":
-		var has_field := false
-		for t in range(world.NT):
-			var b = buildings[t]
-			if b != null and b.done and b.city == city.id and (b.id == "airfield" or b.id == "airport"):
-				has_field = true
-		if not has_field:
+		if city_built_count(city.id, "airfield") == 0 and city_built_count(city.id, "airport") == 0:
 			return "Air units need an Airfield in this city."
 	var mult := _unit_cost_mult(n, city)
 	for k: String in d.cost:
@@ -958,12 +1089,7 @@ func can_fund_ark(n: int) -> String:
 	var nat = nations[n]
 	if not nat.has_flag("scienceVictory"):
 		return "Requires the Ascension Program technology."
-	var has_elevator := false
-	for t in range(world.NT):
-		var b = buildings[t]
-		if b != null and b.done and b.id == "orbitalElevator" and owner[t] == n:
-			has_elevator = true
-	if not has_elevator:
+	if not nation_has_built(n, "orbitalElevator"):
 		return "Requires an Orbital Elevator."
 	if nat.res.materials < ARK_STAGE_COST.materials:
 		return "Not enough Materials."
@@ -1031,18 +1157,34 @@ func _economy_tick(n: int) -> void:
 	var upkeep_gold := 0.0
 	var total_pop := 0
 
+	# bucket this nation's worked tiles by city
+	var city_tiles := {}
+	for t in range(world.NT):
+		if owner[t] == n and tile_city[t] >= 0:
+			if not city_tiles.has(tile_city[t]):
+				city_tiles[tile_city[t]] = []
+			city_tiles[tile_city[t]].append(t)
+
 	for c in cities_of(n):
 		total_pop += c.pop
-		# collect this city's finished buildings
-		var blds: Array = []
-		for t in range(world.NT):
-			var b = buildings[t]
-			if b != null and b.done and b.city == c.id and owner[t] == n:
-				blds.append([t, b])
-		var work_frac: float = minf(1.0, float(c.pop) / maxf(1.0, float(blds.size() - 1)))  # city center is free
-		for pair: Array in blds:
-			var t: int = pair[0]
-			var b: Dictionary = pair[1]
+		var tiles_c: Array = city_tiles.get(c.id, [])
+		# collect this city's finished buildings across all tile slots
+		var blds: Array = []          # [tile, slot, entry]
+		for t: int in tiles_c:
+			var arr = buildings[t]
+			if arr == null:
+				continue
+			for s in range(slots_per_tile()):
+				var b = arr[s]
+				if b != null and b.done:
+					blds.append([t, s, b])
+		# 1 pop works 1 building (the city center is free)
+		var work_frac: float = minf(1.0, float(c.pop) / maxf(1.0, float(blds.size() - 1)))
+		var dep_granted := {}         # tile -> true once its deposit bonus is applied
+		for trip: Array in blds:
+			var t: int = trip[0]
+			var s: int = trip[1]
+			var b: Dictionary = trip[2]
 			var bdef: Dictionary = Data.buildings[b.id]
 			var frac: float = 1.0 if b.id == "cityCenter" else work_frac
 			upkeep_gold += float(bdef.upkeep) * maxf(0.3, 1.0 + nat.modv("upkeep"))
@@ -1057,8 +1199,8 @@ func _economy_tick(n: int) -> void:
 			if bdef.consumes != null:
 				for k: String in bdef.consumes:
 					nat.res[k] -= bdef.consumes[k] * frac
-			# biome multiplier
-			var bio: String = world.t_biome[t]
+			# output scales with the biome of the SLOT the building occupies
+			var bio: String = slot_biome(t, s)
 			var bm := 1.0
 			if bdef.biomeMul != null and bdef.biomeMul.has(bio):
 				bm = float(bdef.biomeMul[bio])
@@ -1066,22 +1208,23 @@ func _economy_tick(n: int) -> void:
 				var mult: float = 1.0 + nat.modv(k) + nat.modv("b:" + b.id) + c.spec_mod(k)
 				var out: float = bdef.yields[k] * bm * maxf(0.0, mult) * frac
 				income[k] = income.get(k, 0.0) + out
-			# deposit bonus
+			# deposit bonus: once per tile, to the first matching building
 			var dep: String = deposit[t]
-			if dep != "":
+			if dep != "" and not dep_granted.has(t):
 				var ddef: Dictionary = Data.deposits[dep]
 				if ddef.worksWith.has(b.id):
+					dep_granted[t] = true
 					var dep_mult: float = 2.0 if b.id == "deepMine" else 1.0
 					for k: String in ddef.yields:
 						income[k] = income.get(k, 0.0) + ddef.yields[k] * frac * dep_mult
-			# city center also harvests its tile's biome
+			# city center also harvests its tile's dominant biome
 			if b.id == "cityCenter":
-				var byields: Dictionary = Data.biomes[bio].yields
+				var byields: Dictionary = Data.biomes[world.t_biome[t]].yields
 				for k: String in byields:
 					income[k] = income.get(k, 0.0) + float(byields[k]) * 0.5
-		# owned undeveloped tiles trickle
-		for t in range(world.NT):
-			if owner[t] == n and tile_city[t] == c.id and buildings[t] == null:
+		# undeveloped tiles trickle
+		for t: int in tiles_c:
+			if tile_built_count(t) == 0:
 				var byields2: Dictionary = Data.biomes[world.t_biome[t]].yields
 				for k: String in byields2:
 					income[k] = income.get(k, 0.0) + float(byields2[k]) * 0.2
@@ -1164,15 +1307,20 @@ func _economy_tick(n: int) -> void:
 
 func _construction_tick() -> void:
 	for t in range(world.NT):
-		var b = buildings[t]
-		if b == null or b.done:
+		var arr = buildings[t]
+		if arr == null:
 			continue
-		b.progress += 1
-		if b.progress >= b.time:
-			b.done = true
-			map_dirty = true
-			if owner[t] == human_id:
-				notify(human_id, "%s completed." % Data.buildings[b.id].name, "good")
+		for s in range(slots_per_tile()):
+			var b = arr[s]
+			if b == null or b.done:
+				continue
+			b.progress += 1
+			if b.progress >= b.time:
+				b.done = true
+				_index_add(int(b.city), b.id, 1)
+				map_dirty = true
+				if owner[t] == human_id:
+					notify(human_id, "%s completed." % Data.buildings[b.id].name, "good")
 
 
 func _training_tick() -> void:
@@ -1424,8 +1572,9 @@ func score(n: int) -> float:
 	for t in range(world.NT):
 		if owner[t] == n:
 			s += 1.0
-			if buildings[t] != null and buildings[t].done:
-				s += 2.0
+			for b in tile_buildings(t):
+				if b.done:
+					s += 2.0
 	s += nations[n].researched.size() * 5.0
 	s += nations[n].res.gold / 100.0
 	return s
@@ -1442,6 +1591,7 @@ func _win(n: int, vid: String) -> void:
 
 func save_game() -> void:
 	var data := {
+		"version": SAVE_VERSION,
 		"params": params, "tick": tick_count, "year": year,
 		"owner": Array(owner), "tile_city": Array(tile_city),
 		"deposit": deposit, "world_capitals": world_capitals,
@@ -1480,6 +1630,9 @@ static func load_game():
 	var data: Variant = JSON.parse_string(f.get_as_text())
 	if data == null:
 		return null
+	if int(data.get("version", 1)) != SAVE_VERSION:
+		push_warning("Save file is from an incompatible version — ignoring.")
+		return null
 	var world := WorldGen.generate(data.params)
 	var g := GameState.new(world, data.params)
 	g.setup_from_save(data)
@@ -1500,10 +1653,17 @@ func setup_from_save(data: Dictionary) -> void:
 	year = float(data.year)
 	buildings.resize(nt)
 	for t in range(nt):
-		var b = data.buildings[t]
-		if b != null:
-			buildings[t] = {"id": b.id, "city": int(b.city), "progress": int(b.progress),
-				"time": int(b.time), "done": b.done}
+		var slots = data.buildings[t]
+		if slots == null:
+			continue
+		var arr: Array = []
+		arr.resize(slots_per_tile())
+		for s in range(mini(int(slots.size()), slots_per_tile())):
+			var b = slots[s]
+			if b != null:
+				arr[s] = {"id": b.id, "city": int(b.city), "progress": int(b.progress),
+					"time": int(b.time), "done": b.done}
+		buildings[t] = arr
 	var difficulty: String = params.get("difficulty", "normal")
 	for nd: Dictionary in data.nations:
 		var nat := Nation.new()
@@ -1571,5 +1731,6 @@ func setup_from_save(data: Dictionary) -> void:
 	for n in range(nations.size()):
 		if nations[n].alive:
 			_recompute_city_dist(n)
+	_rebuild_built_index()
 	fog.recompute()
 	map_dirty = true

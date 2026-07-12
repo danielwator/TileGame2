@@ -9,6 +9,7 @@ var main
 var game
 
 var selected_unit_id := -1
+var _sel_slot := -1
 
 var _res_labels := {}
 var _research_btn: Button
@@ -238,10 +239,11 @@ func _build_panels() -> void:
 	_tile_panel.visible = false
 	add_child(_tile_panel)
 	var sc := ScrollContainer.new()
-	sc.custom_minimum_size = Vector2(300, 0)
+	sc.custom_minimum_size = Vector2(300, 520)
 	_tile_panel.add_child(sc)
 	_tile_box = VBoxContainer.new()
 	_tile_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_tile_box.add_theme_constant_override("separation", 6)
 	sc.add_child(_tile_box)
 
 	_city_panel = PanelContainer.new()
@@ -252,10 +254,11 @@ func _build_panels() -> void:
 	_city_panel.visible = false
 	add_child(_city_panel)
 	var sc2 := ScrollContainer.new()
-	sc2.custom_minimum_size = Vector2(320, 0)
+	sc2.custom_minimum_size = Vector2(320, 560)
 	_city_panel.add_child(sc2)
 	_city_box = VBoxContainer.new()
 	_city_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_city_box.add_theme_constant_override("separation", 6)
 	sc2.add_child(_city_box)
 
 
@@ -287,6 +290,7 @@ func _btn(box: Container, text: String, cb: Callable, enabled := true, tooltip :
 
 func on_select_tile(t: int) -> void:
 	selected_unit_id = -1
+	_sel_slot = -1
 	if t < 0:
 		_tile_panel.visible = false
 		_city_panel.visible = false
@@ -321,18 +325,15 @@ func _refresh_tile_panel() -> void:
 	if game.deposit_visible(game.human_id, t):
 		var dep: Dictionary = Data.deposits[game.deposit[t]]
 		_lbl(_tile_box, "Deposit: %s — %s" % [dep.name, dep.effect], Color(0.95, 0.85, 0.4))
+	# district composition is terrain intel — shown even for dimmed tiles
+	_district_summary(t)
 	if fogst < 2:
 		_lbl(_tile_box, "(Intel only — tile is not currently visible)", COL_DIM, 11)
 		return
 
-	# building
-	var b = game.buildings[t]
-	if b != null:
-		var bdef: Dictionary = Data.buildings[b.id]
-		if b.done:
-			_lbl(_tile_box, "Building: %s" % bdef.name, COL_ACCENT2)
-		else:
-			_lbl(_tile_box, "Constructing %s  (%d/%d)" % [bdef.name, b.progress, b.time], COL_ACCENT2)
+	# district slots (grid of chips; click a slot to build/inspect)
+	if game.tile_city[t] >= 0 and game.owner[t] >= 0:
+		_slot_grid(t)
 
 	# units on tile
 	var here: Array = game.units_on(t)
@@ -371,36 +372,117 @@ func _refresh_tile_panel() -> void:
 		else:
 			_lbl(_tile_box, why2, COL_DIM, 11)
 
-	# build menu
-	if o == game.human_id and b == null and game.tile_city[t] >= 0:
-		_lbl(_tile_box, "Construct:", COL_DIM)
-		var nat = game.nations[game.human_id]
-		var shown := 0
-		for bdef2: Dictionary in Data.building_list:
-			if bdef2.id == "cityCenter":
-				continue
-			if bdef2.tech != null and not nat.researched.has(bdef2.tech):
-				continue
-			var why3: String = game.can_build(game.human_id, t, bdef2.id)
-			if why3 != "" and not why3.begins_with("Not enough"):
-				continue
-			shown += 1
-			var cost_txt := ""
-			for k2: String in bdef2.cost:
-				if float(bdef2.cost[k2]) > 0:
-					cost_txt += "%d %s  " % [int(bdef2.cost[k2]), RES_SHORT.get(k2, k2)]
-			var out_txt := ""
-			for k3: String in bdef2.yields:
-				out_txt += "+%s %s  " % [str(bdef2.yields[k3]), RES_SHORT.get(k3, k3)]
-			var bid: String = bdef2.id
-			_btn(_tile_box, "%s  (%s)" % [bdef2.name, cost_txt.strip_edges()],
-				func() -> void:
-					game.start_building(game.human_id, t, bid)
-					_refresh_tile_panel(),
-				why3 == "",
-				"%s\n%s%s" % [bdef2.desc, out_txt, ("\n" + why3) if why3 != "" else ""])
-		if shown == 0:
-			_lbl(_tile_box, "Nothing can be built here yet.", COL_DIM, 11)
+	# per-slot build menu / building info
+	if o == game.human_id and game.tile_city[t] >= 0 and _sel_slot >= 0:
+		_slot_details(t, _sel_slot)
+
+
+## short composition line, e.g. "5× Forest · 2× Coast · 1× Desert"
+func _district_summary(t: int) -> void:
+	var counts := {}
+	for s in range(game.slots_per_tile()):
+		var bio: String = game.slot_biome(t, s)
+		counts[bio] = int(counts.get(bio, 0)) + 1
+	var parts: Array = []
+	for bio: String in counts:
+		parts.append("%d× %s" % [counts[bio], Data.biomes[bio].name])
+	_lbl(_tile_box, "Districts: " + " · ".join(parts), COL_DIM, 12)
+
+
+const BIOME_SHORT := {
+	"deepOcean": "Deep", "ocean": "Ocean", "coast": "Coast", "lake": "Lake",
+	"iceCap": "Ice", "tundra": "Tundra", "boreal": "Taiga", "grassland": "Grass",
+	"plains": "Plains", "forest": "Forest", "wetland": "Marsh", "savanna": "Savan",
+	"steppe": "Steppe", "desert": "Desert", "rainforest": "Jungle",
+	"highlands": "Hills", "mountain": "Mount", "volcanic": "Volc",
+}
+
+
+func _slot_grid(t: int) -> void:
+	_lbl(_tile_box, "Building slots:", COL_DIM)
+	var grid := GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 4)
+	grid.add_theme_constant_override("v_separation", 4)
+	_tile_box.add_child(grid)
+	for s in range(game.slots_per_tile()):
+		var bio: String = game.slot_biome(t, s)
+		var bcol := Color(Data.biomes[bio].color)
+		var chip := Button.new()
+		chip.custom_minimum_size = Vector2(68, 42)
+		chip.clip_text = true
+		var b = game.slot_building(t, s)
+		if b == null:
+			chip.text = "%s\n—" % BIOME_SHORT.get(bio, bio)
+			chip.tooltip_text = "%s slot — empty. Click to build." % Data.biomes[bio].name
+			chip.modulate = Color(bcol.r * 0.8 + 0.25, bcol.g * 0.8 + 0.25, bcol.b * 0.8 + 0.25)
+		else:
+			var bdef: Dictionary = Data.buildings[b.id]
+			if b.done:
+				chip.text = "%s\n%s" % [BIOME_SHORT.get(bio, bio), bdef.name.left(9)]
+				chip.tooltip_text = "%s (%s slot)\n%s" % [bdef.name, Data.biomes[bio].name, bdef.desc]
+				chip.modulate = Color(1.15, 1.1, 0.95)
+			else:
+				chip.text = "%s\n%d%%" % [BIOME_SHORT.get(bio, bio), int(100.0 * b.progress / maxf(1.0, float(b.time)))]
+				chip.tooltip_text = "Constructing %s (%s slot)" % [bdef.name, Data.biomes[bio].name]
+				chip.modulate = Color(0.7, 0.85, 1.0)
+		if _sel_slot == s:
+			chip.modulate = Color(1.4, 1.3, 0.8)
+		var slot_i := s
+		chip.pressed.connect(func() -> void:
+			_sel_slot = slot_i if _sel_slot != slot_i else -1
+			_refresh_tile_panel())
+		grid.add_child(chip)
+
+
+func _slot_details(t: int, s: int) -> void:
+	var bio: String = game.slot_biome(t, s)
+	var b = game.slot_building(t, s)
+	if b != null:
+		var bdef: Dictionary = Data.buildings[b.id]
+		_lbl(_tile_box, "%s  (%s slot)" % [bdef.name, Data.biomes[bio].name], COL_ACCENT2)
+		if not b.done:
+			_lbl(_tile_box, "Under construction: %d / %d ticks" % [b.progress, b.time], COL_DIM, 12)
+		var out_txt := ""
+		for k: String in bdef.yields:
+			out_txt += "+%s %s  " % [str(bdef.yields[k]), RES_SHORT.get(k, k)]
+		if out_txt != "":
+			_lbl(_tile_box, out_txt, COL_GOOD, 12)
+		if b.id != "cityCenter":
+			_btn(_tile_box, "Demolish", func() -> void:
+				game.demolish(game.human_id, t, s)
+				_sel_slot = -1
+				_refresh_tile_panel())
+		return
+	_lbl(_tile_box, "Build on this %s slot:" % Data.biomes[bio].name, COL_DIM)
+	var nat = game.nations[game.human_id]
+	var shown := 0
+	for bdef2: Dictionary in Data.building_list:
+		if bdef2.id == "cityCenter":
+			continue
+		if bdef2.tech != null and not nat.researched.has(bdef2.tech):
+			continue
+		var why: String = game.can_build(game.human_id, t, s, bdef2.id)
+		if why != "" and not why.begins_with("Not enough"):
+			continue
+		shown += 1
+		var cost_txt := ""
+		for k2: String in bdef2.cost:
+			if float(bdef2.cost[k2]) > 0:
+				cost_txt += "%d %s  " % [int(bdef2.cost[k2]), RES_SHORT.get(k2, k2)]
+		var out_txt2 := ""
+		for k3: String in bdef2.yields:
+			out_txt2 += "+%s %s  " % [str(bdef2.yields[k3]), RES_SHORT.get(k3, k3)]
+		var bid: String = bdef2.id
+		var slot_i := s
+		_btn(_tile_box, "%s  (%s)" % [bdef2.name, cost_txt.strip_edges()],
+			func() -> void:
+				game.start_building(game.human_id, t, slot_i, bid)
+				_refresh_tile_panel(),
+			why == "",
+			"%s\n%s%s" % [bdef2.desc, out_txt2, ("\n" + why) if why != "" else ""])
+	if shown == 0:
+		_lbl(_tile_box, "Nothing can be built on this slot yet.", COL_DIM, 11)
 
 
 func _selected_unit():

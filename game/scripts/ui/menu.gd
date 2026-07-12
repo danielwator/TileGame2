@@ -112,7 +112,8 @@ func setup(m) -> void:
 	_detail_opt.add_item("Standard — 6× tile resolution")
 	_detail_opt.add_item("High — 9× tile resolution")
 	_detail_opt.add_item("Ultra — 12× tile resolution")
-	_detail_opt.selected = 1
+	_detail_opt.add_item("Extreme — 15× tile resolution")
+	_detail_opt.selected = 2
 	_detail_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rowD.add_child(_detail_opt)
 
@@ -182,7 +183,7 @@ func _on_start() -> void:
 	var params := {
 		"seed": _seed_edit.text if _seed_edit.text != "" else _random_seed(),
 		"tile_freq": [16, 20, 24][_size_opt.selected],
-		"detail": [6, 9, 12][_detail_opt.selected],
+		"detail": [6, 9, 12, 15][_detail_opt.selected],
 		"players": int(_players_spin.value),
 		"ocean_fraction": _ocean_slider.value,
 		"temperature": [-0.12, 0.0, 0.12][_climate_opt.selected],

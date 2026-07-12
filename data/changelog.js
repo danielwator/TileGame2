@@ -5,6 +5,22 @@
 'use strict';
 window.CHANGELOG = [
   {
+    version: '0.4.0',
+    date: '2026-07-12',
+    title: 'Districts, per-pixel terrain & the planet look',
+    changes: [
+      'DISTRICT SYSTEM: every hex tile now has 8 building slots, apportioned from the biome composition the tile spans (largest-remainder method) — a tile that is 70% forest / 20% ocean / 10% desert gets 5 forest, 2 ocean and 1 desert slot. Each slot type allows different buildings and applies its own biome output multiplier, so one tile can host a lumber camp, a fishery and a farm side by side (Stellaris-style).',
+      'City centers occupy one slot of their tile; deposit extractors are limited to one per deposit; a tile-level deposit bonus goes to the first matching building; buildings can be demolished from the new slot grid UI in the tile panel.',
+      'Tile panel shows district composition ("3× Plains · 3× Grassland · 2× Highlands") and a clickable 8-slot grid with per-slot build menus; AI evaluates (tile, slot, building) triples.',
+      'PER-PIXEL TERRAIN: biome classification and shading moved into a fragment shader fed by smooth interpolated climate fields — coastlines, lakes and biome borders are now crisp at any zoom, with hypsometric altitude tinting, per-fragment relief noise and moisture pocketing. Default render mesh raised to 12× tile resolution (~576k vertices; 6×/9×/12×/15× menu options).',
+      'THE PLANET LOOK: unexplored fog now reads as a darkened planet surface instead of a black void; added an additive fresnel atmosphere rim, a 1,100-star field, filmic tonemapping with subtle glow, and specular sun glints on water and sea ice.',
+      'Overlay, border, grid and outline layers now hug the terrain relief per-tile instead of floating at fixed radii; camera drag is 1:1 grab-the-globe at any zoom.',
+      'Fixed the inside-out globe rendering (Godot expects clockwise front faces) that could make the planet look see-through; fixed a barycentric indexing crash at simulation-grid boundaries that caused a black screen on world generation.',
+      'Save format bumped to version 2 (per-slot buildings); older saves are ignored by Continue.',
+      'Self-test suite extended to 21 checks including district slot apportionment and multi-building tiles.',
+    ],
+  },
+  {
     version: '0.3.0',
     date: '2026-07-02',
     title: 'High-resolution terrain',

@@ -66,30 +66,34 @@ func _act_economy(n: int) -> void:
 		if best_tile >= 0:
 			game.claim_tile(n, best_tile)
 
-	# construction: sample owned empty tiles, pick best building
-	var empty: Array = []
+	# construction: sample owned tiles with free slots, pick best (slot, building)
+	var open_tiles: Array = []
 	for i in range(game.world.NT):
-		if game.owner[i] == n and game.buildings[i] == null and game.tile_city[i] >= 0:
-			empty.append(i)
-	if not empty.is_empty():
-		empty.shuffle()
-		var best_pair: Array = []
+		if game.owner[i] == n and game.tile_city[i] >= 0 \
+			and game.tile_built_count(i) < game.slots_per_tile():
+			open_tiles.append(i)
+	if not open_tiles.is_empty():
+		open_tiles.shuffle()
+		var best_pick: Array = []      # [tile, slot, bid]
 		var best_v := 0.0
-		for k in range(mini(10, empty.size())):
-			var t: int = empty[k]
-			for b: Dictionary in Data.building_list:
-				if b.id == "cityCenter":
+		for k in range(mini(8, open_tiles.size())):
+			var t: int = open_tiles[k]
+			for s in range(game.slots_per_tile()):
+				if game.slot_building(t, s) != null:
 					continue
-				if b.tech != null and not nat.researched.has(b.tech):
-					continue
-				if game.can_build(n, t, b.id) != "":
-					continue
-				var v := _building_value(n, t, b)
-				if v > best_v:
-					best_v = v
-					best_pair = [t, b.id]
-		if not best_pair.is_empty():
-			game.start_building(n, best_pair[0], best_pair[1])
+				for b: Dictionary in Data.building_list:
+					if b.id == "cityCenter":
+						continue
+					if b.tech != null and not nat.researched.has(b.tech):
+						continue
+					if game.can_build(n, t, s, b.id) != "":
+						continue
+					var v := _building_value(n, t, s, b)
+					if v > best_v:
+						best_v = v
+						best_pick = [t, s, b.id]
+		if not best_pick.is_empty():
+			game.start_building(n, best_pick[0], best_pick[1], best_pick[2])
 
 	# settlers
 	var my_cities: Array = game.cities_of(n)
@@ -127,9 +131,9 @@ func _tile_value(i: int) -> float:
 	return v + 0.5
 
 
-func _building_value(n: int, t: int, bdef: Dictionary) -> float:
+func _building_value(n: int, t: int, s: int, bdef: Dictionary) -> float:
 	var v := 0.0
-	var bio: String = game.world.t_biome[t]
+	var bio: String = game.slot_biome(t, s)
 	var bm := 1.0
 	if bdef.biomeMul != null and bdef.biomeMul.has(bio):
 		bm = float(bdef.biomeMul[bio])

@@ -1,8 +1,8 @@
 # ============================================================
 #  AEONS — RTS globe camera
-#  Drag to rotate (rotation speed scales with zoom), wheel zoom,
-#  WASD/arrows pan, Q/E zoom, inertia. Emits `tile_clicked` when a
-#  press-release happens without dragging.
+#  Drag grabs the globe (surface tracks the cursor ~1:1 at any
+#  zoom), wheel zoom, WASD/arrows pan, Q/E zoom, inertia. Emits
+#  `tile_clicked` when a press-release happens without dragging.
 # ============================================================
 class_name OrbitCamera
 extends Node3D
@@ -34,8 +34,11 @@ func _ready() -> void:
 
 
 func _rot_speed() -> float:
-	var zoom_t := (dist - min_dist) / (max_dist - min_dist)
-	return 0.0016 + 0.0068 * zoom_t
+	# radians of globe arc per screen pixel so the surface point under the
+	# cursor stays under it while dragging (grab-the-globe), at any zoom
+	var vp_h: float = maxf(1.0, get_viewport().get_visible_rect().size.y)
+	var view_h: float = 2.0 * (dist - R) * tan(deg_to_rad(cam.fov * 0.5))
+	return clampf(view_h / (R * vp_h), 0.0006, 0.02)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -57,10 +60,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		var e2 := event as InputEventMouseMotion
 		_moved += absf(e2.relative.x) + absf(e2.relative.y)
 		if _moved >= 6.0:
+			# grab convention: the surface follows the cursor on both axes
 			var s := _rot_speed()
-			theta -= e2.relative.x * s
+			theta += e2.relative.x * s
 			phi -= e2.relative.y * s
-			_v_theta = -e2.relative.x * s
+			_v_theta = e2.relative.x * s
 			_v_phi = -e2.relative.y * s
 			phi = clampf(phi, 0.05, PI - 0.05)
 

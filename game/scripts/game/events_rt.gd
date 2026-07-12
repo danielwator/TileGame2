@@ -86,11 +86,7 @@ func _cond_ok(n: int, ev: Dictionary) -> bool:
 					return true
 			return false
 		"hasBuilding":
-			for i in range(game.world.NT):
-				var bl = game.buildings[i]
-				if bl != null and bl.done and bl.id == parts[1] and game.owner[i] == n:
-					return true
-			return false
+			return game.nation_has_built(n, parts[1])
 		"hasDeposit":
 			for i in range(game.world.NT):
 				if game.owner[i] == n and game.deposit[i] == parts[1]:

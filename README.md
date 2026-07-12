@@ -40,11 +40,17 @@ tools/               Godot editor binaries
 ```
 
 **Terrain is independent of the tile grid**: climate and plates are simulated on a
-medium geodesic field (3× the tile frequency), then barycentrically interpolated and
-re-classified per-vertex onto a much denser render mesh (6×/9×/12× the tile frequency —
-up to ~830k vertices, chosen via the Terrain Detail menu option, generated across all
-CPU cores). Gameplay runs on a coarser Goldberg hex/pentagon tile layer
-(2,562 / 4,002 / 5,762 tiles) that samples the field by majority vote.
+medium geodesic field (3× the tile frequency), barycentrically interpolated onto a much
+denser render mesh (6×–15× the tile frequency, default 12× ≈ 576k vertices, generated
+across all CPU cores), and finished by a **per-fragment shader** that classifies biomes
+per pixel — coastlines and biome borders stay crisp at any zoom. Gameplay runs on a
+coarser Goldberg hex/pentagon tile layer (2,562 / 4,002 / 5,762 tiles).
+
+**Districts**: each tile carries **8 building slots** apportioned from the biome mix it
+spans (70% forest / 20% ocean / 10% desert → 5 forest + 2 ocean + 1 desert slots). Slots
+gate which buildings are allowed and apply their own biome multipliers, so one tile can
+run a lumber camp, fishery and farm side by side — city population limits how many
+buildings actually operate.
 
 **World generation** (fully seeded and deterministic): tectonic plates with motion
 vectors → boundary stress (mountain belts, island arcs, rifts, trenches, hotspot

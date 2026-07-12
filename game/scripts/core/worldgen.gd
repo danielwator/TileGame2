@@ -24,13 +24,15 @@ extends RefCounted
 # tile_freq * detail (must be a multiple of SIM_DETAIL) with fields
 # interpolated + re-classified per render vertex
 const SIM_DETAIL := 3
+# building slots per gameplay tile (Stellaris-style districts)
+const SLOTS_PER_TILE := 8
 
 
 static func default_params() -> Dictionary:
 	return {
 		"seed": "AEONS",
 		"tile_freq": 20,        # 10f^2+2 tiles
-		"detail": 9,            # RENDER mesh frequency multiplier (6/9/12)
+		"detail": 12,           # RENDER mesh frequency multiplier (6/9/12/15)
 		"ocean_fraction": 0.62,
 		"plates": 14,
 		"temperature": 0.0,     # -0.15 ice age .. +0.15 hothouse
@@ -79,9 +81,20 @@ static func generate(user_params: Dictionary) -> Dictionary:
 
 	var nz_detail := FastNoiseLite.new()
 	nz_detail.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	nz_detail.fractal_type = FastNoiseLite.FRACTAL_NONE
-	nz_detail.frequency = 6.5
+	nz_detail.fractal_type = FastNoiseLite.FRACTAL_FBM
+	nz_detail.fractal_octaves = 3
+	nz_detail.fractal_lacunarity = 2.2
+	nz_detail.fractal_gain = 0.5
+	nz_detail.frequency = 4.8
 	nz_detail.seed = hash(seed_str + "|detail")
+
+	# ridged fractal for mountain ranges + rugged land texture
+	var nz_ridge := FastNoiseLite.new()
+	nz_ridge.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	nz_ridge.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	nz_ridge.fractal_octaves = 4
+	nz_ridge.frequency = 1.8
+	nz_ridge.seed = hash(seed_str + "|ridge")
 
 	var nz_warp := FastNoiseLite.new()
 	nz_warp.noise_type = FastNoiseLite.TYPE_SIMPLEX
@@ -207,7 +220,7 @@ static func generate(user_params: Dictionary) -> Dictionary:
 		var p := fverts[i]
 		elev[i] = plate_base[plate_of[i]] \
 			+ nz_elev.get_noise_3dv(p) * 0.55 \
-			+ nz_detail.get_noise_3dv(p) * 0.08 \
+			+ nz_detail.get_noise_3dv(p) * 0.12 \
 			+ stress[i] * 0.6
 	# hotspot island chains
 	var hs_rng := _seeded_rng(seed_str, "hotspots")
@@ -224,6 +237,17 @@ static func generate(user_params: Dictionary) -> Dictionary:
 		var bump := hs_rng.randf_range(0.55, 0.85)
 		var steps: int = hs_rng.randi_range(3, 8) * SIM_DETAIL
 		bump_walk(t, dirv, bump, steps, elev, volcanism, fine, SIM_DETAIL)
+
+	# ridged uplift — fractal mountain ranges and rugged land texture.
+	# Lifts only terrain above the provisional sea level, so the land mask
+	# from the percentile cut below is unchanged (ocean fraction preserved).
+	var sorted0 := Array(elev)
+	sorted0.sort()
+	var sea0: float = sorted0[int(NF * float(P.ocean_fraction))]
+	for i in range(NF):
+		var above := elev[i] - sea0
+		if above > 0.0:
+			elev[i] += above * (nz_ridge.get_noise_3dv(fverts[i]) + 1.0) * 0.55
 
 	# ---------------- 4. sea level ----------------
 	var sorted := Array(elev)
@@ -399,17 +423,52 @@ static func generate(user_params: Dictionary) -> Dictionary:
 	var t_biome: Array = []
 	t_biome.resize(NT)
 	var t_land := PackedByteArray(); t_land.resize(NT)
+	# district slots: each tile gets SLOTS building slots apportioned from the
+	# biome composition it spans (largest-remainder method) — e.g. a tile that
+	# is 70% forest / 20% ocean / 10% desert -> 5 forest, 2 ocean, 1 desert
+	var t_slots: Array = []
+	t_slots.resize(NT)
 	for ti in range(NT):
 		var best_b := 0
 		var best_c := -1
+		var total := 0
 		for b in range(n_biomes):
 			var c := tally[ti * n_biomes + b]
+			total += c
 			if c > best_c:
 				best_c = c
 				best_b = b
 		var bid: String = Data.biome_order[best_b]
 		t_biome[ti] = bid
 		t_land[ti] = 0 if Data.biomes[bid].water else 1
+		# --- largest-remainder apportionment into SLOTS_PER_TILE slots ---
+		var quotas: Array = []   # [biome_idx, floor_count, remainder]
+		var assigned := 0
+		for b in range(n_biomes):
+			var c := tally[ti * n_biomes + b]
+			if c == 0:
+				continue
+			var exact: float = float(c) * SLOTS_PER_TILE / maxf(1.0, float(total))
+			var fl := int(floor(exact))
+			quotas.append([b, fl, exact - fl])
+			assigned += fl
+		quotas.sort_custom(func(x, y): return x[2] > y[2])
+		var qi := 0
+		while assigned < SLOTS_PER_TILE and not quotas.is_empty():
+			quotas[qi % quotas.size()][1] += 1
+			assigned += 1
+			qi += 1
+		# emit slots grouped by count (dominant biome first)
+		quotas.sort_custom(func(x, y): return x[1] > y[1])
+		var slots := PackedInt32Array()
+		for q: Array in quotas:
+			for k in range(q[1]):
+				slots.append(q[0])
+		while slots.size() > SLOTS_PER_TILE:
+			slots.remove_at(slots.size() - 1)
+		while slots.size() < SLOTS_PER_TILE:
+			slots.append(best_b)
+		t_slots[ti] = slots
 
 	# tile deposits (biome-weighted, seeded)
 	var dep_rng := _seeded_rng(seed_str, "deposits")
@@ -515,6 +574,11 @@ static func generate(user_params: Dictionary) -> Dictionary:
 	var r_land := PackedByteArray()
 	var r_temp := PackedFloat32Array()
 	var r_colors := PackedColorArray()
+	var r_elev := PackedFloat32Array()
+	var r_moist := PackedFloat32Array()
+	var r_volc := PackedFloat32Array()
+	var r_lake := PackedFloat32Array()
+	var r_landd := PackedFloat32Array()
 	for c3 in range(n_chunks):
 		var res: Dictionary = ctx.results[c3]
 		r_biome.append_array(res.biome)
@@ -523,6 +587,11 @@ static func generate(user_params: Dictionary) -> Dictionary:
 		r_land.append_array(res.land)
 		r_temp.append_array(res.temp)
 		r_colors.append_array(res.colors)
+		r_elev.append_array(res.elev)
+		r_moist.append_array(res.moist)
+		r_volc.append_array(res.volc)
+		r_lake.append_array(res.lakem)
+		r_landd.append_array(res.landd)
 
 	print("worldgen: sim %d verts in %d ms | render %d verts in %d ms | %d tiles (%d land)" % [
 		NF, t_sim, NR, Time.get_ticks_msec() - t0 - t_sim, NT, land_tiles.size()])
@@ -536,10 +605,14 @@ static func generate(user_params: Dictionary) -> Dictionary:
 		"f_biome": f_biome, "f_plate": plate_of, "f_volcanism": volcanism,
 		"mountain_cut": mountain_cut, "hill_cut": hill_cut,
 		"t_biome": t_biome, "t_land": t_land, "t_deposit": t_deposit,
+		"t_slots": t_slots, "slots_per_tile": SLOTS_PER_TILE,
 		"land_tiles": land_tiles,
 		"render": render, "NR": NR,
 		"r_biome": r_biome, "r_hland": r_hland, "r_hdepth": r_hdepth,
 		"r_land": r_land, "r_temp": r_temp, "r_colors": r_colors,
+		"r_elev": r_elev, "r_moist": r_moist, "r_volc": r_volc,
+		"r_lake": r_lake, "r_landd": r_landd,
+		"sea": sea, "emax": emax, "emin": emin,
 	}
 
 
@@ -609,6 +682,14 @@ static func _render_chunk(ctx: Dictionary, chunk: int) -> void:
 	var o_land := PackedByteArray(); o_land.resize(count)
 	var o_temp := PackedFloat32Array(); o_temp.resize(count)
 	var o_cols := PackedColorArray(); o_cols.resize(count)
+	# raw fields for the per-fragment terrain shader (elev pre-relief-noise:
+	# the shader adds its own high-frequency relief so coastlines stay crisp
+	# below triangle resolution)
+	var o_elev := PackedFloat32Array(); o_elev.resize(count)
+	var o_moist := PackedFloat32Array(); o_moist.resize(count)
+	var o_volc := PackedFloat32Array(); o_volc.resize(count)
+	var o_lakem := PackedFloat32Array(); o_lakem.resize(count)
+	var o_landd := PackedFloat32Array(); o_landd.resize(count)
 
 	for v in range(start, end):
 		var o := v - start
@@ -646,6 +727,12 @@ static func _render_chunk(ctx: Dictionary, chunk: int) -> void:
 		var volc: float = wa * s_volc[ia] + wb * s_volc[ib] + wc * s_volc[ic]
 		var lakem: float = wa * s_lake[ia] + wb * s_lake[ib] + wc * s_lake[ic]
 		var landd: float = wa * s_landd[ia] + wb * s_landd[ib] + wc * s_landd[ic]
+
+		o_elev[o] = e
+		o_moist[o] = m
+		o_volc[o] = volc
+		o_lakem[o] = lakem
+		o_landd[o] = landd
 
 		# render-scale relief detail (coastline wiggle, ridge texture)
 		e += nz_relief.get_noise_3dv(p) * 0.035
@@ -720,6 +807,8 @@ static func _render_chunk(ctx: Dictionary, chunk: int) -> void:
 	ctx.results[chunk] = {
 		"biome": o_biome, "hland": o_hland, "hdepth": o_hdepth,
 		"land": o_land, "temp": o_temp, "colors": o_cols,
+		"elev": o_elev, "moist": o_moist, "volc": o_volc,
+		"lakem": o_lakem, "landd": o_landd,
 	}
 
 

@@ -44,17 +44,58 @@ func _ready() -> void:
 func _setup_environment() -> void:
 	var sun := DirectionalLight3D.new()
 	sun.name = "Sun"
-	sun.light_energy = 0.9
+	sun.light_energy = 1.0
 	add_child(sun)
 	var we := WorldEnvironment.new()
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.016, 0.022, 0.045)
+	env.background_color = Color(0.008, 0.012, 0.028)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(1, 1, 1)
-	env.ambient_light_energy = 0.85
+	env.ambient_light_energy = 0.8
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.glow_enabled = true
+	env.glow_intensity = 0.45
+	env.glow_bloom = 0.05
+	env.glow_hdr_threshold = 0.95
 	we.environment = env
 	add_child(we)
+	_build_starfield()
+
+
+func _build_starfield() -> void:
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	var star := SphereMesh.new()
+	star.radius = 7.0
+	star.height = 14.0
+	star.radial_segments = 6
+	star.rings = 3
+	var smat := StandardMaterial3D.new()
+	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	smat.vertex_color_use_as_albedo = true
+	star.material = smat
+	mm.mesh = star
+	mm.instance_count = 1100
+	var srng := RandomNumberGenerator.new()
+	srng.seed = 20260712
+	for i in range(mm.instance_count):
+		var dir := Vector3(srng.randf_range(-1, 1), srng.randf_range(-1, 1), srng.randf_range(-1, 1)).normalized()
+		var dist := srng.randf_range(6500.0, 9000.0)
+		var s := srng.randf_range(0.35, 1.5)
+		var xf := Transform3D(Basis().scaled(Vector3(s, s, s)), dir * dist)
+		mm.set_instance_transform(i, xf)
+		var warm := srng.randf()
+		var bright := srng.randf_range(0.35, 1.0)
+		mm.set_instance_color(i, Color(
+			bright * (0.85 + 0.15 * warm),
+			bright * (0.85 + 0.10 * warm),
+			bright * (1.0 - 0.15 * warm)))
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.name = "Stars"
+	add_child(mmi)
 
 
 func show_menu() -> void:
@@ -294,19 +335,46 @@ func _run_selftest() -> void:
 	var claimed: bool = claim_target >= 0 and g.claim_tile(hu, claim_target)
 	_check("tile claimed with influence", claimed and g.owner[claim_target] == hu and nat.res.influence < inf_before)
 
-	# --- build a farm on a valid tile ---
+	# --- district slots: composition adds up ---
+	var slot_ok := true
+	for i in range(g.world.NT):
+		if g.world.t_slots[i].size() != g.slots_per_tile():
+			slot_ok = false
+	_check("every tile has %d district slots" % g.slots_per_tile(), slot_ok)
+
+	# --- build a farm on a valid slot ---
 	nat.res.materials = 500.0
 	var farm_tile := -1
+	var farm_slot := -1
 	for i in range(g.world.NT):
-		if g.owner[i] == hu and g.buildings[i] == null and g.can_build(hu, i, "farm") == "":
+		if g.owner[i] != hu:
+			continue
+		var s2 := g.best_slot_for(hu, i, "farm")
+		if s2 >= 0:
 			farm_tile = i
+			farm_slot = s2
 			break
-	var built: bool = farm_tile >= 0 and g.start_building(hu, farm_tile, "farm")
+	var built: bool = farm_tile >= 0 and g.start_building(hu, farm_tile, farm_slot, "farm")
 	_check("farm construction started", built)
 	# run ticks until it finishes
 	for t in range(20):
 		g._do_tick()
-	_check("farm finished building", farm_tile >= 0 and g.buildings[farm_tile] != null and g.buildings[farm_tile].done)
+	var farm_b = g.slot_building(farm_tile, farm_slot) if farm_tile >= 0 else null
+	_check("farm finished building", farm_b != null and farm_b.done)
+
+	# --- a second building on ANOTHER slot of the SAME tile ---
+	nat.res.materials = 800.0
+	var second := ""
+	if farm_tile >= 0:
+		for bid2 in ["huntingCamp", "farm", "quarry", "lumberCamp", "pasture", "shrine"]:
+			var s3 := g.best_slot_for(hu, farm_tile, bid2)
+			if s3 >= 0 and s3 != farm_slot:
+				if g.start_building(hu, farm_tile, s3, bid2):
+					second = bid2
+				break
+	for t in range(20):
+		g._do_tick()
+	_check("second building coexists on same tile", second != "" and g.tile_built_count(farm_tile) >= 2)
 
 	# --- train a warrior ---
 	var cap_city = g.city_at(g.nations[hu].capital_tile)
@@ -389,6 +457,17 @@ func _run_selftest() -> void:
 # ---------------- debug screenshot ----------------
 
 func _maybe_snap() -> void:
+	# AEONS_ZOOM=<dist multiple of R> sets the camera distance (debug)
+	var zoom := OS.get_environment("AEONS_ZOOM")
+	if zoom != "" and orbit != null:
+		orbit.dist = clampf(float(zoom) * 100.0, orbit.min_dist, orbit.max_dist)
+	# AEONS_SELECT=cap selects the capital tile (debug: shows the tile panel)
+	if OS.get_environment("AEONS_SELECT") == "cap" and game != null and hud != null:
+		var cap2: int = game.nations[game.human_id].capital_tile
+		if cap2 >= 0:
+			selected_tile = cap2
+			globe.set_selection(cap2)
+			hud.on_select_tile(cap2)
 	var path := OS.get_environment("AEONS_SNAP")
 	if path == "":
 		return
