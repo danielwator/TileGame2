@@ -290,7 +290,7 @@ func _check(label: String, cond: bool) -> void:
 
 func _run_selftest() -> void:
 	print("=== AEONS self-test ===")
-	start_game({"seed": "TESTBED", "players": 4, "tile_freq": 16, "detail": 6})
+	start_game({"seed": "TESTBED", "players": 4, "tile_freq": 16})
 	var g := game
 	var hu: int = g.human_id
 	var nat = g.nations[hu]

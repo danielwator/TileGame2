@@ -84,7 +84,7 @@
   def(1,'sci','starGazing','Star Gazing',{mod:{science:0.05}},'Patterns in the night sky repay patient watching.');
   def(1,'sci','counting','Counting',{mod:{science:0.05}},'Tallies on bone become arithmetic.');
   def(1,'sci','herbalism','Herbalism',{mod:{healRate:0.25}},'Which leaf soothes and which one kills.');
-  def(1,'sci','writing','Writing',{mod:{science:0.10}},'Memory outsourced to clay. Everything changes.');
+  def(1,'sci','writing','Writing',{mod:{science:0.10,researchOptions:1}},'Memory outsourced to clay. Everything changes. +1 research option to choose from.');
   def(1,'sci','sailing','Sailing',{unlockU:['galley'],flag:['embark']},'Wind does the rowing. Land units may embark onto coastal waters.');
   def(1,'sci','calendars','Calendars',{mod:{food:0.10}},'Knowing when to plant is half the harvest.');
   def(1,'civ','tribalCouncil','Tribal Council',{mod:{maxPolicies:1}},'Elders argue so warriors don\'t have to. Unlocks the first policy slot.');
@@ -195,7 +195,7 @@
   def(4,'com','customsAndExcise','Customs & Excise',{unlockB:['customsHouse']},'Every border crossing pays its toll.');
   def(4,'com','tradeCompanies','Chartered Companies',{mod:{claimCost:-0.10}},'Private empires with public flags.');
   def(4,'com','colonialTrade','Colonial Trade',{mod:{gold:0.15}},'Triangle routes and treasure fleets.');
-  def(4,'sci','scientificMethod','Scientific Method',{mod:{science:0.15}},'Test it or toss it.');
+  def(4,'sci','scientificMethod','Scientific Method',{mod:{science:0.15,researchOptions:1}},'Test it or toss it. +1 research option to choose from.');
   def(4,'sci','heliocentrism','Heliocentrism',{unlockB:['observatory']},'The Earth is demoted; science is promoted.',{also:['instrumentMaking']});
   def(4,'sci','anatomy','Anatomy',{mod:{healRate:0.25}},'Medicine finally looks inside.');
   def(4,'sci','cartography','Cartography',{unlockU:['caravel'],flag:['deepOcean']},'Charts tame the abyss. Ships may cross Deep Ocean.');
@@ -309,7 +309,7 @@
   def(7,'com','ventureCapital','Venture Capital',{mod:{science:0.10,gold:0.05}},'Betting big on clever people.');
   def(7,'com','commercialAviation','Commercial Aviation',{unlockB:['airport'],mod:{tradeCap:1}},'Anywhere on Earth by dinnertime.');
   def(7,'com','serviceEconomy','Service Economy',{mod:{gold:0.10}},'Wealth from work you can\'t drop on your foot.');
-  def(7,'sci','computers','Computers',{unlockB:['dataCenter'],mod:{science:0.15}},'Arithmetic at the speed of light.');
+  def(7,'sci','computers','Computers',{unlockB:['dataCenter'],mod:{science:0.15,researchOptions:1}},'Arithmetic at the speed of light. +1 research option to choose from.');
   def(7,'sci','internet','The Internet',{unlockB:['mediaNetwork'],mod:{science:0.15,influence:0.10}},'Everyone talks to everyone, about everything.');
   def(7,'sci','satellites','Satellites',{mod:{vision:2},flag:['revealMap']},'The whole globe on one screen. Reveals the world map.');
   def(7,'sci','polarScience','Polar Science',{unlockB:['polarResearchStation'],flag:['iceTravel']},'Icebreakers open the last frontier. Units may cross Ice Caps.');

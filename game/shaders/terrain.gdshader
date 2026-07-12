@@ -1,41 +1,75 @@
 // ============================================================
-//  AEONS — per-fragment terrain classification
+//  AEONS — per-fragment terrain (ported from the original
+//  TileGame project's WorldGenerator.ClassifyTile + palette)
 //
-//  The mesh carries smooth interpolated FIELDS (elevation, temp,
-//  moisture, volcanism, lake mask, land distance) as CUSTOM0/1.
-//  Biome classification + shading run here, per pixel, so
-//  coastlines, lakes and islands are crisp at any zoom instead of
-//  being smeared by vertex-color interpolation. Mirrors the CPU
-//  logic in worldgen._render_chunk (kept for tile aggregation).
+//  The CPU generates 1024x512 field grids (elevation, moisture,
+//  geo/volcanic, temperature-variation) plus a post-process mask
+//  (rivers, lakes, coastal shallows, island/lake fills). This
+//  shader bilinearly samples the fields, re-runs the original
+//  classification per pixel (their hi-res "RevealAll" trick) and
+//  paints with the original tile palette — crisp at any zoom.
 //
-//  Biome palette order (fixed contract with globe_mesh.gd):
-//   0 iceCap    1 lake      2 coast     3 ocean     4 deepOcean
-//   5 mountain  6 volcanic  7 highlands 8 tundra    9 boreal
-//  10 wetland  11 desert   12 steppe   13 plains   14 grassland
-//  15 forest   16 savanna  17 rainforest
+//  Palette order = WorldGen.TT enum (fixed contract).
 // ============================================================
 shader_type spatial;
-render_mode cull_back;
+render_mode unshaded, cull_back;
 
-uniform vec4 palette[18];
-uniform float sea = 0.5;
-uniform float emax = 1.0;
-uniform float emin = 0.0;
-uniform float mcut = 0.8;
-uniform float hcut = 0.6;
+uniform sampler2D fields: filter_linear, repeat_enable;  // r=elev g=moist b=geo a=tvar
+uniform sampler2D mask_tex: filter_nearest, repeat_enable; // post-process overrides
+uniform vec4 palette[25];
+uniform float sea = 0.52;
+uniform float temp_bias = 0.0;
+uniform float moist_bias = 0.0;
 uniform vec3 noise_off = vec3(0.0);
 
+const float SHALLOW_OFFSET = 0.05;
+const float BEACH_OFFSET = 0.03;
+const float MOUNTAIN_LEVEL = 0.78;
+const float SNOW_PEAK_LEVEL = 0.88;
+const float VOLCANIC_RATE = 0.78;
+const float TV_STRENGTH = 0.42;
+
+// tile type ids (WorldGen.TT)
+const int T_OCEAN = 0;
+const int T_SHALLOW = 1;
+const int T_CORAL = 2;
+const int T_BEACH = 3;
+const int T_MANGROVE = 4;
+const int T_SWAMP = 5;
+const int T_ICECAP = 6;
+const int T_TUNDRA = 7;
+const int T_TAIGA = 8;
+const int T_PINE = 9;
+const int T_GRASS = 10;
+const int T_STEPPE = 11;
+const int T_TFOREST = 12;
+const int T_SHRUB = 13;
+const int T_JUNGLE = 14;
+const int T_TROPFOREST = 15;
+const int T_SAVANNA = 16;
+const int T_DESERT = 17;
+const int T_SALT = 18;
+const int T_ALPINE = 19;
+const int T_MOUNTAIN = 20;
+const int T_VOLCANO = 21;
+const int T_SNOWPEAK = 22;
+const int T_LAKE = 23;
+const int T_RIVER = 24;
+
+// mask values (WorldGen.MASK)
+const int M_NONE = 0;
+const int M_RIVER = 1;
+const int M_LAKE = 2;
+const int M_SHALLOW = 3;
+const int M_LAND_FILL = 4;
+const int M_OCEAN_FILL = 5;
+
 varying vec3 v_dir;
-varying vec4 v_f0; // elev(pre-relief), temp, moist, volcanism
-varying vec2 v_f1; // lake mask, land distance
 
 void vertex() {
 	v_dir = normalize(VERTEX);
-	v_f0 = CUSTOM0;
-	v_f1 = CUSTOM1.xy;
 }
 
-// same hash as worldgen._stable_rand
 float hash13(vec3 p) {
 	return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
 }
@@ -59,130 +93,99 @@ float vnoise(vec3 p) {
 	return mix(mix(nx00, nx10, f.y), mix(nx01, nx11, f.y), f.z) * 2.0 - 1.0;
 }
 
-// matches CPU relief noise shape: 3-octave fBm, lacunarity 2.1, gain 0.52
-float fbm3(vec3 p) {
-	float a = 1.0;
-	float s = 0.0;
-	float norm = 0.0;
-	for (int k = 0; k < 3; k++) {
-		s += vnoise(p) * a;
-		norm += a;
-		a *= 0.52;
-		p *= 2.1;
-	}
-	return s / norm;
-}
-
 vec3 srgb2lin(vec3 c) {
 	return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
 }
 
+// direct port of WorldGenerator.ClassifyTile
+int classify(float e, float latitude, float moisture, float geo, float tv) {
+	moisture = clamp(moisture + moist_bias, 0.0, 1.0);
+	float sea_temp = 1.0 - latitude;
+
+	if (e < sea - SHALLOW_OFFSET) { return T_OCEAN; }
+	if (e < sea) {
+		return (latitude < 0.14 && moisture < 0.52) ? T_CORAL : T_SHALLOW;
+	}
+	if (e < sea + BEACH_OFFSET) {
+		if (latitude < 0.22 && moisture > 0.62) { return T_MANGROVE; }
+		if (moisture > 0.72 && sea_temp > 0.38) { return T_SWAMP; }
+		return T_BEACH;
+	}
+	if (e < sea + BEACH_OFFSET + 0.05 && moisture > 0.76 && sea_temp > 0.38) { return T_SWAMP; }
+
+	float alt_chill = max(0.0, (e - sea) / (MOUNTAIN_LEVEL - sea)) * 0.5;
+	float temp = clamp(1.0 - latitude - alt_chill + temp_bias + (tv - 0.5) * TV_STRENGTH, 0.0, 1.0);
+	float temp_no_alt = clamp(1.0 - latitude + temp_bias + (tv - 0.5) * TV_STRENGTH, 0.0, 1.0);
+	if (temp_no_alt < 0.12) { return T_ICECAP; }
+
+	if (e >= SNOW_PEAK_LEVEL) { return temp_no_alt <= 0.55 ? T_SNOWPEAK : T_MOUNTAIN; }
+	if (e >= MOUNTAIN_LEVEL) { return geo > VOLCANIC_RATE ? T_VOLCANO : T_MOUNTAIN; }
+	if (e >= MOUNTAIN_LEVEL - 0.08) {
+		float alpine_temp = clamp(1.0 - latitude - 0.35, 0.0, 1.0);
+		return alpine_temp > 0.22 ? T_ALPINE : T_TUNDRA;
+	}
+
+	if (temp < 0.28) { return moisture > 0.48 ? T_TAIGA : T_TUNDRA; }
+	if (temp < 0.46) {
+		if (moisture > 0.60) { return T_TAIGA; }
+		if (moisture > 0.42) { return T_PINE; }
+		if (moisture > 0.26) { return T_GRASS; }
+		return moisture > 0.12 ? T_STEPPE : T_TUNDRA;
+	}
+	if (temp < 0.68) {
+		if (moisture > 0.70) { return T_SWAMP; }
+		if (moisture > 0.50) { return T_TFOREST; }
+		if (moisture > 0.34) { return T_GRASS; }
+		if (moisture > 0.20) { return T_SHRUB; }
+		return T_DESERT;
+	}
+	if (moisture > 0.68) { return T_JUNGLE; }
+	if (moisture > 0.48) { return T_TROPFOREST; }
+	if (moisture > 0.32) { return T_SAVANNA; }
+	if (moisture > 0.22) { return T_SHRUB; }
+	if (moisture > 0.07) { return T_DESERT; }
+	return T_SALT;
+}
+
+bool is_water(int t) {
+	return t == T_OCEAN || t == T_SHALLOW || t == T_CORAL || t == T_LAKE;
+}
+
 void fragment() {
+	vec2 tex_size = vec2(textureSize(fields, 0));
 	vec3 dir = normalize(v_dir);
-	// relief detail applied here (per fragment) — coastline wiggle and small
-	// islands emerge below triangle resolution
-	float e = v_f0.x + fbm3((dir + noise_off) * 14.0) * 0.035;
-	float t = v_f0.y;
-	float m = v_f0.z;
-	float volc = v_f0.w;
-	float lakem = v_f1.x;
-	float landd = v_f1.y;
-	// medium-scale moisture pockets break up large uniform biome patches
-	m = clamp(m + vnoise((dir + noise_off) * 7.0) * 0.09, 0.0, 1.0);
+	float lat = asin(clamp(dir.y, -1.0, 1.0));
+	float lon = atan(dir.x, dir.z);          // matches grid convention (sin lon, ..., cos lon)
+	float u = fract(lon / TAU);
+	float v = clamp((lat + PI * 0.5) / PI, 0.5 / tex_size.y, 1.0 - 0.5 / tex_size.y);
+	vec2 uv = vec2(u, v);
 
-	bool land = e >= sea;
-	float h = 0.0;
-	float hd = 0.0;
-	if (land) {
-		h = clamp((e - sea) / max(1e-6, emax - sea), 0.0, 1.1);
-	} else {
-		hd = clamp((sea - e) / max(1e-6, sea - emin), 0.0, 1.1);
-	}
+	vec4 f = texture(fields, uv);
+	float e = f.r;
+	float m = f.g;
+	float geo = f.b;
+	float tv = f.a;
+	float latitude = abs(v * 2.0 - 1.0);
 
-	// stable quantized dither cells ~ render-vertex spacing, so volcano /
-	// wetland speckle looks like the CPU per-vertex dither, not pixel noise
-	vec3 cell = floor((dir + noise_off) * 160.0);
-	float dith = hash13(cell);
-	float dith2 = hash13(cell * 1.7 + 3.7);
+	// sub-cell detail: breaks up bilinear plateaus without moving coastlines far
+	vec3 dn = dir + noise_off;
+	e += vnoise(dn * 42.0) * 0.008 + vnoise(dn * 95.0) * 0.004;
+	m = clamp(m + vnoise(dn * 27.0) * 0.035, 0.0, 1.0);
 
-	// ---- biome classification (same thresholds as worldgen) ----
-	int b;
-	if (!land) {
-		if (t < 0.12) { b = 0; }
-		else if (lakem > 0.5) { b = 1; }
-		else if (hd < 0.09 && landd <= 1.4) { b = 2; }
-		else if (hd < 0.45) { b = 3; }
-		else { b = 4; }
-	}
-	else if (h > mcut) { b = 5; }
-	else if (volc > 0.60 && h > 0.12 && dith < 0.4) { b = 6; }
-	else if (t < 0.13) { b = 0; }
-	else if (h > hcut) { b = 7; }
-	else if (t < 0.24) { b = 8; }
-	else if (t < 0.42) { b = m > 0.42 ? 9 : 8; }
-	else if (m > 0.82 && h < 0.08 && t < 0.75 && dith2 < 0.55) { b = 10; }
-	else if (t < 0.70) {
-		if (m < 0.18) { b = 11; }
-		else if (m < 0.34) { b = 12; }
-		else if (m < 0.50) { b = 13; }
-		else if (m < 0.64) { b = 14; }
-		else { b = 15; }
-	}
-	else {
-		if (m < 0.16) { b = 11; }
-		else if (m < 0.42) { b = 16; }
-		else if (m < 0.60) { b = 14; }
-		else if (m < 0.78) { b = 13; }
-		else { b = 17; }
-	}
+	int t = classify(e, latitude, m, geo, tv);
 
-	// ---- terrain shading (sRGB space, matching the CPU color math) ----
-	vec3 col = palette[b].rgb;
-	vec3 SNOW = vec3(0.94, 0.95, 0.97);
-	vec3 SAND = vec3(0.90, 0.85, 0.66);
-	vec3 ICE_TINT = vec3(0.8, 0.87, 0.93);
-	vec3 ocean_col = palette[3].rgb;
-	vec3 deep_col = palette[4].rgb;
-	vec3 mnt_col = palette[5].rgb;
+	// post-process overrides carved by the CPU passes (their RevealAll rule:
+	// rivers/lakes win over reclassification)
+	int mk = int(texture(mask_tex, uv).r * 255.0 + 0.5);
+	if (mk == M_RIVER) { t = T_RIVER; }
+	else if (mk == M_LAKE) { t = T_LAKE; }
+	else if (mk == M_SHALLOW) { if (t == T_OCEAN) { t = T_SHALLOW; } }
+	else if (mk == M_LAND_FILL) { if (is_water(t)) { t = T_GRASS; } }
+	else if (mk == M_OCEAN_FILL) { if (!is_water(t)) { t = T_OCEAN; } }
 
-	if (!land) {
-		if (b == 2) { col = mix(col, ocean_col, clamp(hd * 6.0, 0.0, 0.6)); }
-		else if (b == 3) { col = mix(col, deep_col, smoothstep(0.09, 0.55, hd)); }
-		else if (b == 4) { col = mix(col, deep_col * 0.85, smoothstep(0.5, 1.0, hd)); }
-		else if (b == 0) { col = mix(col, ICE_TINT, 0.25); }
-	} else {
-		if (b == 5) { col = mix(col, SNOW, smoothstep(0.55, 0.9, h + (0.24 - min(t, 0.24)))); }
-		else if (b == 7) { col = mix(col, mnt_col, smoothstep(hcut, mcut, h) * 0.5); }
-		// hypsometric tint: lowlands keep their biome hue, then tan
-		// highlands, bare rock, and snow above — the atlas look
-		vec3 TAN = vec3(0.82, 0.74, 0.55);
-		vec3 ROCK = vec3(0.63, 0.57, 0.50);
-		col = mix(col, TAN, smoothstep(0.30, 0.72, h) * 0.42);
-		col = mix(col, ROCK, smoothstep(0.55, 0.95, h) * 0.60);
-		col = mix(col, SNOW, smoothstep(0.80, 1.02, h + max(0.0, 0.20 - t) * 0.8));
-		if (t < 0.20 && b != 0) { col = mix(col, SNOW, (0.20 - t) / 0.20 * 0.55); }
-		// shoreline beaches
-		if (h < 0.035 && t > 0.30 && b != 5 && b != 7 && b != 10) {
-			col = mix(col, SAND, 0.55 * (1.0 - h / 0.035));
-		}
-	}
-	// soft cartographic grading: mild desaturation + lift toward white
-	float lum = dot(col, vec3(0.299, 0.587, 0.114));
-	col = mix(col, vec3(lum), 0.18);
-	col = mix(col, vec3(1.0), 0.08);
-	float j = vnoise((dir - noise_off) * 26.0) * 0.025 + (hash13(cell + 17.0) - 0.5) * 0.012;
-	col = clamp(col + vec3(j), 0.0, 1.0);
+	vec3 col = palette[t].rgb;
+	// faint per-pixel grain keeps large fields from looking flat
+	col = clamp(col + vec3(vnoise(dn * 160.0) * 0.012), 0.0, 1.0);
 
 	ALBEDO = srgb2lin(col);
-	// water takes a specular sun glint; land stays matte
-	if (land) {
-		ROUGHNESS = 0.95;
-		SPECULAR = 0.12;
-	} else if (b == 0) {           // sea ice: soft sheen
-		ROUGHNESS = 0.55;
-		SPECULAR = 0.35;
-	} else {
-		ROUGHNESS = mix(0.34, 0.20, clamp(hd * 2.0, 0.0, 1.0));
-		SPECULAR = 0.55;
-	}
 }

@@ -1,9 +1,12 @@
 # ============================================================
 #  AEONS — globe renderer
 #
-#  Layers (bottom to top):
-#   terrain   — high-res fine-field mesh, vertex colors + relief
-#   grid      — subtle tile edge lines (the gameplay layer)
+#  Terrain: a sphere shaded by shaders/terrain.gdshader, which
+#  re-classifies the ported 1024x512 field grids per fragment
+#  (the original TileGame project's globe look).
+#
+#  Layers above it (all on the gameplay tile geometry):
+#   grid      — subtle tile edge lines
 #   overlay   — per-tile translucent tint: fog of war + nation color
 #   borders   — nation border ribbons along tile edges
 #   outlines  — selection / hover tile outlines
@@ -12,17 +15,13 @@ class_name GlobeMesh
 extends Node3D
 
 const R := 100.0
-# layers hug the terrain: lift above the local ground, in world units
-const GRID_LIFT := 0.25
-const OVERLAY_LIFT := 0.45
-const BORDER_LIFT := 0.7
-const OUTLINE_LIFT := 0.9
+const GRID_R := R * 1.004
+const OVERLAY_R := R * 1.008
+const BORDER_R := R * 1.012
+const OUTLINE_R := R * 1.016
 
 var world: Dictionary
-var f_radius: PackedFloat32Array
-var t_radius: PackedFloat32Array
-var t_rmax: PackedFloat32Array      # per-tile max terrain radius (incl. relief-noise headroom)
-var _corner_r: Dictionary = {}      # quantized tile-corner key -> max radius of adjacent tiles
+var t_radius: PackedFloat32Array   # kept for markers API (flat sphere: all R)
 
 var terrain: MeshInstance3D
 var grid_lines: MeshInstance3D
@@ -37,10 +36,14 @@ var _overlay_col: PackedColorArray
 var _overlay_vstart: PackedInt32Array
 var _overlay_vcount: PackedInt32Array
 
+
 func build(w: Dictionary) -> void:
 	world = w
 	for c in get_children():
 		c.queue_free()
+	t_radius = PackedFloat32Array()
+	t_radius.resize(world.NT)
+	t_radius.fill(R)
 	_build_terrain()
 	_build_atmosphere()
 	_build_grid_lines()
@@ -49,145 +52,56 @@ func build(w: Dictionary) -> void:
 	hover_line = _make_outline(Color(1, 0.9, 0.43, 0.6))
 
 
-# ---------------- terrain (fine field) ----------------
-
-# palette order is a fixed contract with shaders/terrain.gdshader
-const SHADER_BIOME_ORDER: Array[String] = [
-	"iceCap", "lake", "coast", "ocean", "deepOcean",
-	"mountain", "volcanic", "highlands", "tundra", "boreal",
-	"wetland", "desert", "steppe", "plains", "grassland",
-	"forest", "savanna", "rainforest",
-]
+# ---------------- terrain (field-grid sphere) ----------------
 
 func _build_terrain() -> void:
-	var render: Dictionary = world.render
-	var NR: int = world.NR
-	var rverts: PackedVector3Array = render.verts
-	var tris: PackedInt32Array = render.tris
-	var r_land: PackedByteArray = world.r_land
-	var r_hland: PackedFloat32Array = world.r_hland
+	var grid: Dictionary = world.grid
+	var W: int = grid.W
+	var H: int = grid.H
 
-	var pos := PackedVector3Array()
-	pos.resize(NR)
-	for i in range(NR):
-		pos[i] = rverts[i] * (R * (1.0 + (r_hland[i] * 0.04 if r_land[i] == 1 else 0.0)))
-
-	# smooth fields for the per-fragment classifier: CUSTOM0 = (elev, temp,
-	# moist, volc), CUSTOM1 = (lake mask, land distance, 0, 0)
-	var r_elev: PackedFloat32Array = world.r_elev
-	var r_temp: PackedFloat32Array = world.r_temp
-	var r_moist: PackedFloat32Array = world.r_moist
-	var r_volc: PackedFloat32Array = world.r_volc
-	var r_lake: PackedFloat32Array = world.r_lake
-	var r_landd: PackedFloat32Array = world.r_landd
-	var f0 := PackedFloat32Array()
-	f0.resize(NR * 4)
-	var f1 := PackedFloat32Array()
-	f1.resize(NR * 4)
-	for i in range(NR):
+	# pack the four field grids into one RGBAF image
+	var fields := PackedFloat32Array()
+	fields.resize(W * H * 4)
+	var elev: PackedFloat32Array = grid.elev
+	var moist: PackedFloat32Array = grid.moist
+	var geo: PackedFloat32Array = grid.geo
+	var tvar: PackedFloat32Array = grid.tvar
+	for i in range(W * H):
 		var o := i * 4
-		f0[o] = r_elev[i]
-		f0[o + 1] = r_temp[i]
-		f0[o + 2] = r_moist[i]
-		f0[o + 3] = r_volc[i]
-		f1[o] = r_lake[i]
-		f1[o + 1] = r_landd[i]
+		fields[o] = elev[i]
+		fields[o + 1] = moist[i]
+		fields[o + 2] = geo[i]
+		fields[o + 3] = tvar[i]
+	var f_img := Image.create_from_data(W, H, false, Image.FORMAT_RGBAF, fields.to_byte_array())
+	var f_tex := ImageTexture.create_from_image(f_img)
 
-	# per-tile mean render radius (markers sit on this) — from the sim grid
-	var NF: int = world.NF
-	var f_hland: PackedFloat32Array = world.f_hland
-	var f_land: PackedByteArray = world.f_land
-	f_radius = PackedFloat32Array()
-	f_radius.resize(NF)
-	for i in range(NF):
-		f_radius[i] = R * (1.0 + (f_hland[i] * 0.04 if f_land[i] == 1 else 0.0))
-	var NT: int = world.NT
-	t_radius = PackedFloat32Array()
-	t_radius.resize(NT)
-	var cnt := PackedInt32Array()
-	cnt.resize(NT)
-	var tof: PackedInt32Array = world.tile_of_fine
-	for i in range(NF):
-		t_radius[tof[i]] += f_radius[i]
-		cnt[tof[i]] += 1
-	for ti in range(NT):
-		t_radius[ti] = t_radius[ti] / maxf(1.0, float(cnt[ti]))
-
-	# per-tile MAX terrain radius so grid/overlay/border layers can hug the
-	# ground without peaks poking through; includes headroom for the 0.035
-	# relief noise the render pass adds on top of the interpolated sim field
-	var f_elev: PackedFloat32Array = world.f_elev
-	var sea: float = world.sea
-	var emax: float = world.emax
-	t_rmax = PackedFloat32Array()
-	t_rmax.resize(NT)
-	t_rmax.fill(R)
-	for i in range(NF):
-		var e_hi: float = f_elev[i] + 0.035
-		if e_hi >= sea:
-			var h_hi := minf((e_hi - sea) / maxf(1e-6, emax - sea), 1.1)
-			t_rmax[tof[i]] = maxf(t_rmax[tof[i]], R * (1.0 + h_hi * 0.04))
-
-	# per-corner radius = max over the 2-3 tiles meeting at that corner, so
-	# shared corners agree and layers never dip under a neighbor's terrain
-	_corner_r = {}
-	var tcorners: Array = world.tiles.corners
-	for ti in range(NT):
-		var poly: PackedVector3Array = tcorners[ti]
-		for c in poly:
-			var k := SphereGrid._key(c)
-			_corner_r[k] = maxf(_corner_r.get(k, R), t_rmax[ti])
-
-	# smooth normals accumulated from faces (source tris are CCW-from-outside,
-	# so this cross product points outward)
-	var nrm := PackedVector3Array()
-	nrm.resize(NR)
-	for t in range(0, tris.size(), 3):
-		var a := tris[t]; var b := tris[t + 1]; var c := tris[t + 2]
-		var fn := (pos[b] - pos[a]).cross(pos[c] - pos[a])
-		nrm[a] += fn; nrm[b] += fn; nrm[c] += fn
-	for i in range(NR):
-		nrm[i] = nrm[i].normalized()
-
-	# Godot front faces are CLOCKWISE (opposite of the CCW source data):
-	# flip each triangle so the outside is front-facing and back-culling works
-	var idx := PackedInt32Array()
-	idx.resize(tris.size())
-	for t in range(0, tris.size(), 3):
-		idx[t] = tris[t]
-		idx[t + 1] = tris[t + 2]
-		idx[t + 2] = tris[t + 1]
-
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = pos
-	arrays[Mesh.ARRAY_NORMAL] = nrm
-	arrays[Mesh.ARRAY_CUSTOM0] = f0
-	arrays[Mesh.ARRAY_CUSTOM1] = f1
-	arrays[Mesh.ARRAY_INDEX] = idx
-	var fmt: int = (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT) \
-		| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM1_SHIFT)
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, fmt)
+	var m_img := Image.create_from_data(W, H, false, Image.FORMAT_R8, grid.mask)
+	var m_tex := ImageTexture.create_from_image(m_img)
 
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://shaders/terrain.gdshader")
+	mat.set_shader_parameter("fields", f_tex)
+	mat.set_shader_parameter("mask_tex", m_tex)
 	var pal := PackedColorArray()
-	pal.resize(SHADER_BIOME_ORDER.size())
-	for k in range(SHADER_BIOME_ORDER.size()):
-		pal[k] = Color(Data.biomes[SHADER_BIOME_ORDER[k]].color)
+	pal.resize(WorldGen.TT_COUNT)
+	for k in range(WorldGen.TT_COUNT):
+		pal[k] = WorldGen.TT_COLORS[k]
 	mat.set_shader_parameter("palette", pal)
 	mat.set_shader_parameter("sea", world.sea)
-	mat.set_shader_parameter("emax", world.emax)
-	mat.set_shader_parameter("emin", world.emin)
-	mat.set_shader_parameter("mcut", world.mountain_cut)
-	mat.set_shader_parameter("hcut", world.hill_cut)
+	mat.set_shader_parameter("temp_bias", world.temp_bias)
+	mat.set_shader_parameter("moist_bias", world.moist_bias)
 	var sh := hash(str(world.seed) + "|shader")
 	mat.set_shader_parameter("noise_off", Vector3(
 		float(sh % 289), float((sh / 289) % 289), float((sh / 83521) % 289)) * 0.031)
-	mesh.surface_set_material(0, mat)
+
+	var sphere := SphereMesh.new()
+	sphere.radius = R
+	sphere.height = R * 2.0
+	sphere.radial_segments = 128
+	sphere.rings = 64
+	sphere.material = mat
 	terrain = MeshInstance3D.new()
-	terrain.mesh = mesh
+	terrain.mesh = sphere
 	add_child(terrain)
 
 
@@ -223,8 +137,8 @@ func _build_grid_lines() -> void:
 			if seen.has(ek):
 				continue
 			seen[ek] = true
-			pos.append(a * (_corner_r.get(ka, R) + GRID_LIFT))
-			pos.append(b * (_corner_r.get(kb, R) + GRID_LIFT))
+			pos.append(a * GRID_R)
+			pos.append(b * GRID_R)
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = pos
@@ -255,9 +169,9 @@ func _build_overlay() -> void:
 		var base := _overlay_pos.size()
 		_overlay_vstart[ti] = base
 		_overlay_vcount[ti] = poly.size() + 1
-		_overlay_pos.append(tiles.centers[ti] * (t_rmax[ti] + OVERLAY_LIFT))
+		_overlay_pos.append(tiles.centers[ti] * OVERLAY_R)
 		for c in poly:
-			_overlay_pos.append(c * (_corner_r.get(SphereGrid._key(c), R) + OVERLAY_LIFT))
+			_overlay_pos.append(c * OVERLAY_R)
 		var L := poly.size()
 		for k in range(L):
 			# corners are CCW-from-outside; emit CW for Godot front-facing
@@ -326,7 +240,7 @@ func set_borders(owner_of: Callable, color_of: Callable, show: Callable) -> void
 		var c: Color = color_of.call(o)
 		c.a = 0.85
 		var poly: PackedVector3Array = tiles.corners[ti]
-		var ctr: Vector3 = tiles.centers[ti] * (t_rmax[ti] + BORDER_LIFT)
+		var ctr: Vector3 = tiles.centers[ti] * BORDER_R
 		for e in range(off[ti], off[ti + 1]):
 			if owner_of.call(nbr[e]) == o:
 				continue
@@ -334,8 +248,8 @@ func set_borders(owner_of: Callable, color_of: Callable, show: Callable) -> void
 			var cb := edge_b[e]
 			if ca < 0:
 				continue
-			var p1: Vector3 = poly[ca] * (_corner_r.get(SphereGrid._key(poly[ca]), R) + BORDER_LIFT)
-			var p2: Vector3 = poly[cb] * (_corner_r.get(SphereGrid._key(poly[cb]), R) + BORDER_LIFT)
+			var p1: Vector3 = poly[ca] * BORDER_R
+			var p2: Vector3 = poly[cb] * BORDER_R
 			var q1 := p1.lerp(ctr, INSET)
 			var q2 := p2.lerp(ctr, INSET)
 			var base := pos.size()
@@ -382,10 +296,8 @@ func _set_outline(mi: MeshInstance3D, ti: int, lift: float) -> void:
 	var pos := PackedVector3Array()
 	var L := poly.size()
 	for k in range(L):
-		var a: Vector3 = poly[k]
-		var b: Vector3 = poly[(k + 1) % L]
-		pos.append(a * (_corner_r.get(SphereGrid._key(a), R) + OUTLINE_LIFT + lift))
-		pos.append(b * (_corner_r.get(SphereGrid._key(b), R) + OUTLINE_LIFT + lift))
+		pos.append(poly[k] * (OUTLINE_R + lift))
+		pos.append(poly[(k + 1) % L] * (OUTLINE_R + lift))
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = pos
@@ -413,7 +325,7 @@ func set_hover(ti: int) -> void:
 ## Ray-sphere intersection then nearest tile center. -1 if missed.
 func tile_from_ray(origin: Vector3, dir: Vector3) -> int:
 	var b := 2.0 * origin.dot(dir)
-	var c := origin.dot(origin) - R * R * 1.045 * 1.045
+	var c := origin.dot(origin) - R * R
 	var disc := b * b - 4.0 * c
 	if disc < 0.0:
 		return -1
@@ -433,4 +345,4 @@ func tile_from_ray(origin: Vector3, dir: Vector3) -> int:
 
 
 func tile_world_pos(ti: int, lift: float = 0.0) -> Vector3:
-	return world.tiles.centers[ti] * (maxf(t_radius[ti], R) + lift)
+	return world.tiles.centers[ti] * (R + lift)

@@ -12,7 +12,6 @@ var _ocean_slider: HSlider
 var _ocean_label: Label
 var _climate_opt: OptionButton
 var _diff_opt: OptionButton
-var _detail_opt: OptionButton
 var _start_btn: Button
 
 const SEED_WORDS := ["AZURE", "TERRA", "ORION", "DELTA", "EMBER", "FROST", "GALE", "IONIA",
@@ -106,17 +105,6 @@ func setup(m) -> void:
 	_ocean_slider.value_changed.connect(func(val: float) -> void:
 		_ocean_label.text = "%d%%" % int(val * 100))
 
-	# terrain detail
-	var rowD := _field(v, "Terrain Detail")
-	_detail_opt = OptionButton.new()
-	_detail_opt.add_item("Standard — 6× tile resolution")
-	_detail_opt.add_item("High — 9× tile resolution")
-	_detail_opt.add_item("Ultra — 12× tile resolution")
-	_detail_opt.add_item("Extreme — 15× tile resolution")
-	_detail_opt.selected = 2
-	_detail_opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	rowD.add_child(_detail_opt)
-
 	# climate
 	var row5 := _field(v, "Climate")
 	_climate_opt = OptionButton.new()
@@ -183,10 +171,11 @@ func _on_start() -> void:
 	var params := {
 		"seed": _seed_edit.text if _seed_edit.text != "" else _random_seed(),
 		"tile_freq": [16, 20, 24][_size_opt.selected],
-		"detail": [6, 9, 12, 15][_detail_opt.selected],
 		"players": int(_players_spin.value),
-		"ocean_fraction": _ocean_slider.value,
+		# ocean slider (0.5..0.75 coverage) maps onto the generator's sea level
+		"sea_level": 0.40 + _ocean_slider.value * 0.24,
 		"temperature": [-0.12, 0.0, 0.12][_climate_opt.selected],
+		"humidity": 0.0,
 		"difficulty": ["easy", "normal", "hard"][_diff_opt.selected],
 	}
 	# show generation feedback before the (seconds-long) synchronous build

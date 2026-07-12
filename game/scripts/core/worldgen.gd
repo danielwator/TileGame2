@@ -1,481 +1,336 @@
 # ============================================================
-#  AEONS — parametric world generation (seeded, deterministic)
+#  AEONS — world generation
 #
-#  The terrain FIELD is computed per fine-grid vertex (high res),
-#  fully independent of the gameplay tile layer. Pipeline:
-#   1. tectonic plates    — domain-warped weighted Voronoi with
-#                           per-plate motion vectors
-#   2. boundary stress    — convergent -> mountain belts / arcs,
-#                           divergent -> rifts / ridges
-#   3. elevation          — plate base + fBm + stress + hotspots
-#   4. sea level          — percentile cut at target ocean fraction
-#   5. temperature        — latitude curve, altitude lapse, noise
-#   6. moisture           — prevailing-wind advection from oceans,
-#                           orographic rain shadows, ITCZ + horse
-#                           latitudes, rank-normalized spread
-#   7. biomes             — Whittaker temp x moisture matrix with
-#                           percentile mountain/highland cuts
-#  Tiles then AGGREGATE the field (majority biome) and get deposits.
+#  PORTED FROM THE ORIGINAL TileGame PROJECT (C# WorldGenerator):
+#  an equirectangular 1024x512 tile grid over the sphere with
+#   * hidden tectonic plates (domain-warped Voronoi, drift stress)
+#   * continental + detail + ridged elevation noise, polar caps
+#   * moisture with ITCZ/Hadley bands and tectonic rain shadows
+#   * Whittaker classification into 25 tile types
+#   * lake filling/smoothing, tiny-island culling, coastal shallows
+#   * depression-filled river routing with meanders
+#
+#  The gameplay layer is unchanged: Goldberg hex/pentagon tiles
+#  sample the grid beneath them — each tile's district slots come
+#  from the composition of grid cells it spans.
 # ============================================================
 class_name WorldGen
 extends RefCounted
 
-# climate/plates simulate at tile_freq * SIM_DETAIL; the render mesh is
-# tile_freq * detail (must be a multiple of SIM_DETAIL) with fields
-# interpolated + re-classified per render vertex
-const SIM_DETAIL := 3
+const GRID_W := 1024
+const GRID_H := 512
+
+# --- tuning constants (mirroring the original project's exports) ---
+const SEA_LEVEL := 0.52
+const SHALLOW_OFFSET := 0.05
+const BEACH_OFFSET := 0.03
+const MOUNTAIN_LEVEL := 0.78
+const SNOW_PEAK_LEVEL := 0.88
+const CONTINENTAL_FREQ := 2.0
+const DETAIL_FREQ := 4.5
+const MOISTURE_FREQ := 2.8
+const MOISTURE_DETAIL_FREQ := 7.0
+const MOISTURE_DETAIL_BLEND := 0.28
+const TEMP_VARIATION_FREQ := 2.5
+const TEMP_VARIATION_STRENGTH := 0.42
+const VOLCANIC_RATE := 0.78
+const MIN_ISLAND_SIZE := 500
+const PLATE_COUNT := 14
+const COASTAL_STRIP_WIDTH := 3
+const RIVER_STRIDE := 60
+const MIN_LAKE_SIZE := 30
+const MAX_LAKE_SIZE := 2000
+
 # building slots per gameplay tile (Stellaris-style districts)
 const SLOTS_PER_TILE := 8
+
+# --- tile types (order matches the original C# enum & shader palette) ---
+enum TT {
+	OCEAN, SHALLOW, CORAL,
+	BEACH, MANGROVE,
+	SWAMP,
+	ICECAP, TUNDRA, TAIGA, PINE_FOREST,
+	GRASSLAND, STEPPE, TEMPERATE_FOREST, SHRUBLAND,
+	JUNGLE, TROPICAL_FOREST, SAVANNA,
+	DESERT, SALT_FLAT,
+	ALPINE_MEADOW, MOUNTAIN, VOLCANO, SNOW_PEAK,
+	LAKE, RIVER,
+}
+const TT_COUNT := 25
+
+# original project's globe palette (GlobeRenderer.cs TileColors)
+const TT_COLORS: Array[Color] = [
+	Color(0.05, 0.14, 0.44),   # Ocean
+	Color(0.10, 0.26, 0.62),   # ShallowWater
+	Color(0.06, 0.40, 0.52),   # CoralReef
+	Color(0.88, 0.82, 0.58),   # Beach
+	Color(0.12, 0.42, 0.24),   # Mangrove
+	Color(0.20, 0.28, 0.14),   # Swamp
+	Color(0.88, 0.94, 1.00),   # IceCap
+	Color(0.62, 0.68, 0.58),   # Tundra
+	Color(0.16, 0.36, 0.26),   # Taiga
+	Color(0.10, 0.34, 0.18),   # PineForest
+	Color(0.45, 0.65, 0.22),   # Grassland
+	Color(0.68, 0.60, 0.28),   # Steppe
+	Color(0.16, 0.50, 0.16),   # TemperateForest
+	Color(0.56, 0.60, 0.24),   # Shrubland
+	Color(0.02, 0.20, 0.04),   # Jungle
+	Color(0.04, 0.30, 0.06),   # TropicalForest
+	Color(0.80, 0.68, 0.28),   # Savanna
+	Color(0.90, 0.76, 0.36),   # Desert
+	Color(0.92, 0.90, 0.84),   # SaltFlat
+	Color(0.55, 0.65, 0.38),   # AlpineMeadow
+	Color(0.54, 0.48, 0.42),   # Mountain
+	Color(0.18, 0.08, 0.06),   # Volcano
+	Color(0.96, 0.97, 1.00),   # SnowPeak
+	Color(0.15, 0.35, 0.66),   # Lake
+	Color(0.16, 0.34, 0.68),   # River
+]
+
+# their tile types -> AEONS gameplay biome ids (data/biomes.js unchanged)
+const TT_TO_BIOME := {
+	TT.OCEAN: "deepOcean", TT.SHALLOW: "coast", TT.CORAL: "coast",
+	TT.BEACH: "plains", TT.MANGROVE: "wetland",
+	TT.SWAMP: "wetland",
+	TT.ICECAP: "iceCap", TT.TUNDRA: "tundra", TT.TAIGA: "boreal", TT.PINE_FOREST: "boreal",
+	TT.GRASSLAND: "grassland", TT.STEPPE: "steppe",
+	TT.TEMPERATE_FOREST: "forest", TT.SHRUBLAND: "steppe",
+	TT.JUNGLE: "rainforest", TT.TROPICAL_FOREST: "forest", TT.SAVANNA: "savanna",
+	TT.DESERT: "desert", TT.SALT_FLAT: "desert",
+	TT.ALPINE_MEADOW: "highlands", TT.MOUNTAIN: "mountain",
+	TT.VOLCANO: "volcanic", TT.SNOW_PEAK: "mountain",
+	TT.LAKE: "lake", TT.RIVER: "grassland",   # rivers = fertile floodplains
+}
+
+# display-mask overrides carved by post-processing (shader honours these)
+enum MASK { NONE = 0, RIVER = 1, LAKE = 2, SHALLOW = 3, LAND_FILL = 4, OCEAN_FILL = 5 }
 
 
 static func default_params() -> Dictionary:
 	return {
 		"seed": "AEONS",
-		"tile_freq": 20,        # 10f^2+2 tiles
-		"detail": 12,           # RENDER mesh frequency multiplier (6/9/12/15)
-		"ocean_fraction": 0.62,
-		"plates": 14,
-		"temperature": 0.0,     # -0.15 ice age .. +0.15 hothouse
-		"humidity": 0.0,
+		"tile_freq": 20,        # 10f^2+2 gameplay tiles
+		"players": 5,
+		"sea_level": SEA_LEVEL, # menu ocean slider maps here
+		"temperature": 0.0,     # TemperatureBias
+		"humidity": 0.0,        # MoistureBias
 		"resource_richness": 1.0,
 	}
 
 
-static func _seeded_rng(seed_str: String, phase: String) -> RandomNumberGenerator:
-	var r := RandomNumberGenerator.new()
-	r.seed = hash(seed_str + "|" + phase)
-	return r
-
-
-static func _stable_rand(p: Vector3) -> float:
-	var x: float = sin(p.x * 127.1 + p.y * 311.7 + p.z * 74.7) * 43758.5453
-	return x - floor(x)
+static func _noise(seed_i: int, freq: float, octaves: int) -> FastNoiseLite:
+	var n := FastNoiseLite.new()
+	n.seed = seed_i
+	n.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	n.frequency = freq
+	n.fractal_octaves = octaves
+	n.fractal_lacunarity = 2.1
+	n.fractal_gain = 0.48
+	return n
 
 
 static func generate(user_params: Dictionary) -> Dictionary:
 	var P := default_params()
 	P.merge(user_params, true)
-	if int(P.detail) % SIM_DETAIL != 0 or int(P.detail) < SIM_DETAIL:
-		P.detail = 9
 	var seed_str: String = P.seed
+	var seed_i: int = hash(seed_str)
+	var sea: float = float(P.get("sea_level", SEA_LEVEL))
 	var t0 := Time.get_ticks_msec()
 
-	var tiles := SphereGrid.build_goldberg(P.tile_freq)
-	var fine := SphereGrid.build_geodesic(P.tile_freq * SIM_DETAIL, true)
-	var tile_of := SphereGrid.map_fine_to_tiles(fine, tiles)
-	var NF: int = fine.n
+	var tiles := SphereGrid.build_goldberg(int(P.tile_freq))
 	var NT: int = tiles.n
-	var fverts: PackedVector3Array = fine.verts
-	var foff: PackedInt32Array = fine.nbr_off
-	var fnbr: PackedInt32Array = fine.nbr
 
-	# ---------------- noise sources ----------------
-	var nz_elev := FastNoiseLite.new()
-	nz_elev.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	nz_elev.fractal_type = FastNoiseLite.FRACTAL_FBM
-	nz_elev.fractal_octaves = 5
-	nz_elev.fractal_lacunarity = 2.1
-	nz_elev.fractal_gain = 0.52
-	nz_elev.frequency = 1.9
-	nz_elev.seed = hash(seed_str + "|elev")
+	var W := GRID_W
+	var H := GRID_H
+	var N := W * H
+	var elev := PackedFloat32Array(); elev.resize(N)
+	var moist := PackedFloat32Array(); moist.resize(N)
+	var geo := PackedFloat32Array(); geo.resize(N)
+	var tvar := PackedFloat32Array(); tvar.resize(N)
+	var ttype := PackedByteArray(); ttype.resize(N)
+	var mask := PackedByteArray(); mask.resize(N)
+	var stress := PackedFloat32Array(); stress.resize(N)
+	var tec_field := PackedFloat32Array(); tec_field.resize(N)
 
-	var nz_detail := FastNoiseLite.new()
-	nz_detail.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	nz_detail.fractal_type = FastNoiseLite.FRACTAL_FBM
-	nz_detail.fractal_octaves = 3
-	nz_detail.fractal_lacunarity = 2.2
-	nz_detail.fractal_gain = 0.5
-	nz_detail.frequency = 4.8
-	nz_detail.seed = hash(seed_str + "|detail")
+	# ---------------- tectonic plates ----------------
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_i ^ 0x2C3D4E
+	var centers := PackedVector3Array()
+	var is_conti: Array[bool] = []
+	var drifts := PackedVector3Array()
+	var min_sep_sq := 1.2 / PLATE_COUNT
+	for i in range(PLATE_COUNT):
+		var c := Vector3.ZERO
+		for tries in range(8):
+			var u := rng.randf() * 2.0 - 1.0
+			var theta := rng.randf() * TAU
+			var r := sqrt(maxf(0.0, 1.0 - u * u))
+			c = Vector3(r * cos(theta), u, r * sin(theta))
+			var ok := true
+			for k in range(i):
+				if (c - centers[k]).length_squared() < min_sep_sq:
+					ok = false
+					break
+			if ok:
+				break
+		centers.append(c)
+		is_conti.append(rng.randf() < 0.42)
+		var da := rng.randf() * TAU
+		var refv := Vector3.UP if absf(c.y) < 0.9 else Vector3.RIGHT
+		var t1 := c.cross(refv).normalized()
+		var t2 := c.cross(t1).normalized()
+		drifts.append(t1 * cos(da) + t2 * sin(da))
 
-	# ridged fractal for mountain ranges + rugged land texture
-	var nz_ridge := FastNoiseLite.new()
-	nz_ridge.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	nz_ridge.fractal_type = FastNoiseLite.FRACTAL_RIDGED
-	nz_ridge.fractal_octaves = 4
-	nz_ridge.frequency = 1.8
-	nz_ridge.seed = hash(seed_str + "|ridge")
+	# noise stack (seeds mirror the original offsets)
+	var n_cont := _noise(seed_i, CONTINENTAL_FREQ, 3)
+	var n_detail := _noise(seed_i + 777, DETAIL_FREQ, 5)
+	var n_moist := _noise(seed_i + 3333, MOISTURE_FREQ, 4)
+	var n_mdetail := _noise(seed_i + 4444, MOISTURE_DETAIL_FREQ, 3)
+	var n_geo := _noise(seed_i + 9999, 3.0, 2)
+	var n_ridge := _noise(seed_i + 5555, 1.8, 5)
+	n_ridge.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	var n_tv := _noise(seed_i + 1111, TEMP_VARIATION_FREQ, 3)
+	var w_lo_x := _noise(seed_i ^ 0x1A2B3C, 0.65, 3)
+	var w_lo_y := _noise(seed_i ^ 0x4D5E6F, 0.65, 3)
+	var w_lo_z := _noise(seed_i ^ 0x7A8B9C, 0.65, 3)
+	var w_hi_x := _noise(seed_i ^ 0xB1C2D3, 2.80, 4)
+	var w_hi_y := _noise(seed_i ^ 0xE4F5A6, 2.80, 4)
+	var w_hi_z := _noise(seed_i ^ 0x09C8D7, 2.80, 4)
 
-	var nz_warp := FastNoiseLite.new()
-	nz_warp.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	nz_warp.fractal_type = FastNoiseLite.FRACTAL_NONE
-	nz_warp.frequency = 3.1
-	nz_warp.seed = hash(seed_str + "|warp")
+	var ctx := {
+		"W": W, "H": H, "sea": sea,
+		"temp_bias": float(P.temperature), "moist_bias": float(P.humidity),
+		"elev": elev, "moist": moist, "geo": geo, "tvar": tvar,
+		"ttype": ttype, "stress": stress, "tec_field": tec_field,
+		"centers": centers, "is_conti": is_conti, "drifts": drifts,
+		"n_cont": n_cont, "n_detail": n_detail, "n_moist": n_moist,
+		"n_mdetail": n_mdetail, "n_geo": n_geo, "n_ridge": n_ridge, "n_tv": n_tv,
+		"w_lo_x": w_lo_x, "w_lo_y": w_lo_y, "w_lo_z": w_lo_z,
+		"w_hi_x": w_hi_x, "w_hi_y": w_hi_y, "w_hi_z": w_hi_z,
+	}
+	var chunks: int = clampi(OS.get_processor_count(), 2, 16)
+	ctx.chunks = chunks
 
-	var nz_clim := FastNoiseLite.new()
-	nz_clim.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	nz_clim.fractal_type = FastNoiseLite.FRACTAL_NONE
-	nz_clim.frequency = 2.7
-	nz_clim.seed = hash(seed_str + "|clim")
+	# pass 1: tectonic field (stress must exist before rain shadows)
+	var g1 := WorkerThreadPool.add_group_task(func(c: int) -> void: _tectonic_chunk(ctx, c), chunks)
+	WorkerThreadPool.wait_for_group_task_completion(g1)
+	var t_tec := Time.get_ticks_msec()
 
-	var nz_moist := FastNoiseLite.new()
-	nz_moist.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	nz_moist.fractal_type = FastNoiseLite.FRACTAL_NONE
-	nz_moist.frequency = 3.3
-	nz_moist.seed = hash(seed_str + "|moistn")
+	# pass 2: elevation / moisture / classification
+	var g2 := WorkerThreadPool.add_group_task(func(c: int) -> void: _fill_chunk(ctx, c), chunks)
+	WorkerThreadPool.wait_for_group_task_completion(g2)
+	var t_fill := Time.get_ticks_msec()
 
-	# ---------------- 1. plates ----------------
-	var rng := _seeded_rng(seed_str, "plates")
-	var n_plates: int = P.plates
-	var plate_seed := PackedVector3Array()
-	var plate_oceanic := PackedByteArray()
-	var plate_base := PackedFloat32Array()
-	var plate_motion := PackedVector3Array()
-	var plate_growth := PackedFloat32Array()
-	for pi in range(n_plates):
-		# spread seeds: best of 16 candidates by min-distance
-		var best := Vector3.ZERO
-		var best_score := -1.0
-		for c in range(16):
-			var cand := Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), rng.randf_range(-1, 1)).normalized()
-			var min_d := 10.0
-			for s in range(pi):
-				min_d = minf(min_d, 1.0 - cand.dot(plate_seed[s]))
-			var score := min_d if pi > 0 else 1.0
-			if score > best_score:
-				best_score = score
-				best = cand
-		plate_seed.append(best)
-		var oceanic := rng.randf() < 0.55
-		plate_oceanic.append(1 if oceanic else 0)
-		plate_base.append(rng.randf_range(-0.9, -0.45) if oceanic else rng.randf_range(0.08, 0.4))
-		var up := Vector3(0, 1, 0) if absf(best.y) < 0.99 else Vector3(1, 0, 0)
-		var t1 := up.cross(best).normalized()
-		var t2 := best.cross(t1)
-		var ang := rng.randf_range(0, TAU)
-		plate_motion.append((t1 * cos(ang) + t2 * sin(ang)) * rng.randf_range(0.4, 1.0))
-		plate_growth.append(rng.randf_range(0.75, 1.35))
+	# post passes (ported: lakes, smoothing, islands, coastal water, rivers)
+	_fill_lakes(ttype, mask, W, H)
+	_smooth_lakes(ttype, mask, W, H, ctx)
+	_remove_tiny_islands(ttype, mask, W, H)
+	_ensure_coastal_water(ttype, mask, W, H)
+	var route_elev := _fill_depressions(elev, sea, W, H)
+	_generate_rivers(ttype, mask, elev, route_elev, seed_i, W, H)
+	var t_post := Time.get_ticks_msec()
 
-	# domain-warped weighted nearest-seed assignment
-	var plate_of := PackedInt32Array()
-	plate_of.resize(NF)
-	var O1 := Vector3(31.4, 0, 0)
-	var O2 := Vector3(0, 47.2, 0)
-	var O3 := Vector3(0, 0, 12.9)
-	for i in range(NF):
-		var p := fverts[i]
-		var w := Vector3(
-			nz_warp.get_noise_3dv(p + O1),
-			nz_warp.get_noise_3dv(p + O2),
-			nz_warp.get_noise_3dv(p + O3))
-		var q := (p + w * 0.22).normalized()
-		var best_pl := 0
-		var best_d := 1e9
-		for s in range(n_plates):
-			var d := (1.0 - q.dot(plate_seed[s])) / plate_growth[s]
-			if d < best_d:
-				best_d = d
-				best_pl = s
-		plate_of[i] = best_pl
-
-	# ---------------- 2. boundary stress ----------------
-	var stress := PackedFloat32Array()
-	stress.resize(NF)
-	var volcanism := PackedFloat32Array()
-	volcanism.resize(NF)
-	for i in range(NF):
-		var pi := plate_of[i]
-		for e in range(foff[i], foff[i + 1]):
-			var nb := fnbr[e]
-			var pj := plate_of[nb]
-			if pj == pi:
-				continue
-			var dir := (fverts[nb] - fverts[i]).normalized()
-			var conv := -(plate_motion[pj] - plate_motion[pi]).dot(dir)
-			var oi := plate_oceanic[pi] == 1
-			var oj := plate_oceanic[pj] == 1
-			if conv > 0.08:
-				if not oi and not oj:
-					stress[i] += conv * 1.5
-				elif oi != oj:
-					if not oi:
-						stress[i] += conv * 1.1
-						volcanism[i] += conv
-					else:
-						stress[i] -= conv * 0.5
-				else:
-					stress[i] += conv * 0.7
-					volcanism[i] += conv * 0.8
-			elif conv < -0.08:
-				stress[i] += conv * 0.45
-				if oi and oj:
-					stress[i] += 0.04   # mid-ocean ridge stays submarine
-	# diffuse stress a few hops inland
-	for pass_i in range(3):
-		var nxt := PackedFloat32Array()
-		nxt.resize(NF)
-		for i in range(NF):
-			var s := stress[i]
-			var cnt := 1.0
-			for e in range(foff[i], foff[i + 1]):
-				s += stress[fnbr[e]] * 0.55
-				cnt += 0.55
-			nxt[i] = s / cnt
-		stress = nxt
-
-	# ---------------- 3. elevation ----------------
-	var elev := PackedFloat32Array()
-	elev.resize(NF)
-	for i in range(NF):
-		var p := fverts[i]
-		elev[i] = plate_base[plate_of[i]] \
-			+ nz_elev.get_noise_3dv(p) * 0.55 \
-			+ nz_detail.get_noise_3dv(p) * 0.12 \
-			+ stress[i] * 0.6
-	# hotspot island chains
-	var hs_rng := _seeded_rng(seed_str, "hotspots")
-	for h in range(hs_rng.randi_range(4, 7)):
-		var t := hs_rng.randi_range(0, NF - 1)
-		if plate_oceanic[plate_of[t]] == 0:
-			continue
-		var c0 := fverts[t]
-		var up := Vector3(0, 1, 0) if absf(c0.y) < 0.99 else Vector3(1, 0, 0)
-		var t1 := up.cross(c0).normalized()
-		var t2 := c0.cross(t1)
-		var ang := hs_rng.randf_range(0, TAU)
-		var dirv := t1 * cos(ang) + t2 * sin(ang)
-		var bump := hs_rng.randf_range(0.55, 0.85)
-		var steps: int = hs_rng.randi_range(3, 8) * SIM_DETAIL
-		bump_walk(t, dirv, bump, steps, elev, volcanism, fine, SIM_DETAIL)
-
-	# ridged uplift — fractal mountain ranges and rugged land texture.
-	# Lifts only terrain above the provisional sea level, so the land mask
-	# from the percentile cut below is unchanged (ocean fraction preserved).
-	var sorted0 := Array(elev)
-	sorted0.sort()
-	var sea0: float = sorted0[int(NF * float(P.ocean_fraction))]
-	for i in range(NF):
-		var above := elev[i] - sea0
-		if above > 0.0:
-			elev[i] += above * (nz_ridge.get_noise_3dv(fverts[i]) + 1.0) * 0.55
-
-	# ---------------- 4. sea level ----------------
-	var sorted := Array(elev)
-	sorted.sort()
-	var sea: float = sorted[int(NF * float(P.ocean_fraction))]
-	var emax: float = sorted[NF - 1]
-	var emin: float = sorted[0]
-	var h_land := PackedFloat32Array(); h_land.resize(NF)
-	var h_depth := PackedFloat32Array(); h_depth.resize(NF)
-	var is_land := PackedByteArray(); is_land.resize(NF)
-	for i in range(NF):
-		if elev[i] >= sea:
-			h_land[i] = (elev[i] - sea) / maxf(1e-6, emax - sea)
-			is_land[i] = 1
-		else:
-			h_depth[i] = (sea - elev[i]) / maxf(1e-6, sea - emin)
-
-	# lakes: small disconnected water bodies (on the fine graph)
-	var is_lake := PackedByteArray(); is_lake.resize(NF)
-	var comp := PackedInt32Array(); comp.resize(NF); comp.fill(-1)
-	var comp_size: Array = []
-	var n_comp := 0
-	for i in range(NF):
-		if is_land[i] == 1 or comp[i] != -1:
-			continue
-		var q: Array = [i]
-		comp[i] = n_comp
-		var head := 0
-		var size := 0
-		while head < q.size():
-			var cur: int = q[head]
-			head += 1
-			size += 1
-			for e in range(foff[cur], foff[cur + 1]):
-				var nb := fnbr[e]
-				if is_land[nb] == 0 and comp[nb] == -1:
-					comp[nb] = n_comp
-					q.append(nb)
-		comp_size.append(size)
-		n_comp += 1
-	var lake_max: int = 12 * SIM_DETAIL * SIM_DETAIL
-	for i in range(NF):
-		if is_land[i] == 0 and comp_size[comp[i]] <= lake_max:
-			is_lake[i] = 1
-
-	# ---------------- 5. temperature ----------------
-	var temp := PackedFloat32Array(); temp.resize(NF)
-	for i in range(NF):
-		var p := fverts[i]
-		var latd: float = rad_to_deg(asin(clampf(p.y, -1.0, 1.0)))
-		var t: float = pow(maxf(0.0, cos(deg_to_rad(latd))), 1.15)
-		t += nz_clim.get_noise_3dv(p + Vector3(31, 0, 0)) * 0.07
-		t -= h_land[i] * 0.52
-		t += float(P.temperature)
-		temp[i] = clampf(t, 0.0, 1.0)
-
-	# ---------------- 6. moisture ----------------
-	var moist := PackedFloat32Array(); moist.resize(NF)
-	var wind := PackedVector3Array(); wind.resize(NF)
-	for i in range(NF):
-		var p := fverts[i]
-		var latd: float = rad_to_deg(asin(clampf(p.y, -1.0, 1.0)))
-		var east := p.cross(Vector3(0, 1, 0)).normalized()
-		var northv := east.cross(p).normalized()
-		var a := absf(latd)
-		var sgn: float = 1.0 if latd >= 0 else -1.0
-		var ew: float; var ns: float
-		if a < 30.0:
-			ew = -0.85; ns = -0.35 * sgn
-		elif a < 60.0:
-			ew = 0.85; ns = 0.25 * sgn
-		else:
-			ew = -0.8; ns = -0.2 * sgn
-		wind[i] = (east * ew + northv * ns).normalized()
-		if is_land[i] == 0:
-			moist[i] = clampf(0.55 + temp[i] * 0.55, 0.0, 1.05)
-	# advect moisture inland along the wind, with orographic decay
-	var land_idx := PackedInt32Array()
-	for i in range(NF):
-		if is_land[i] == 1:
-			land_idx.append(i)
-	var passes: int = 9 * SIM_DETAIL
-	for pass_i in range(passes):
-		var changed := false
-		for li in range(land_idx.size()):
-			var i := land_idx[li]
-			var best := moist[i]
-			var pv := fverts[i]
-			for e in range(foff[i], foff[i + 1]):
-				var nb := fnbr[e]
-				var carry := wind[nb].dot((pv - fverts[nb]).normalized())
-				if carry <= 0.15:
-					continue
-				var climb := maxf(0.0, h_land[i] - h_land[nb])
-				var barrier: float = 0.30 if h_land[i] > 0.45 else 0.0
-				# per-hop decay adjusted for sim-grid resolution
-				var decay: float = 1.0 - (0.045 + climb * 0.9 + barrier * carry) / SIM_DETAIL
-				var m: float = moist[nb] * clampf(decay, 0.3, 0.995) * (0.55 + 0.45 * carry)
-				if m > best:
-					best = m
-					changed = true
-			moist[i] = best
-		if not changed:
-			break
-	for li in range(land_idx.size()):
-		var i := land_idx[li]
-		var p := fverts[i]
-		var latd: float = rad_to_deg(asin(clampf(p.y, -1.0, 1.0)))
-		var m: float = moist[i] + nz_moist.get_noise_3dv(p - Vector3(17, 0, 0)) * 0.10 + float(P.humidity)
-		m += exp(-pow(latd / 12.0, 2.0)) * 0.14                    # ITCZ rains
-		m -= exp(-pow((absf(latd) - 25.0) / 9.0, 2.0)) * 0.16      # horse latitudes
-		moist[i] = clampf(m, 0.0, 1.0)
-	# rank-normalize blend: every world keeps a full dry-to-wet spread
-	var order := Array(land_idx)
-	order.sort_custom(func(a, b): return moist[a] < moist[b])
-	var Lm := maxf(1.0, float(order.size() - 1))
-	for r in range(order.size()):
-		var i: int = order[r]
-		moist[i] = clampf(moist[i] * 0.55 + (float(r) / Lm) * 0.45, 0.0, 1.0)
-
-	# ---------------- 7. biomes (fine field) ----------------
-	# percentile-based rugged cuts
-	var land_h := []
-	for li in range(land_idx.size()):
-		land_h.append(h_land[land_idx[li]])
-	land_h.sort()
-	var mountain_cut := 0.52
-	var hill_cut := 0.30
-	if land_h.size() > 20:
-		mountain_cut = maxf(land_h[int(land_h.size() * 0.92)], 0.28)
-		hill_cut = maxf(land_h[int(land_h.size() * 0.78)], 0.18)
-
-	var bidx: Dictionary = Data.biome_index
-	var f_biome := PackedInt32Array(); f_biome.resize(NF)
-	for i in range(NF):
-		var t := temp[i]
-		var m := moist[i]
-		var h := h_land[i]
-		var b: String
-		if is_land[i] == 0:
-			if t < 0.12: b = "iceCap"
-			elif is_lake[i] == 1: b = "lake"
-			elif h_depth[i] < 0.16 and _has_land_nbr(i, foff, fnbr, is_land): b = "coast"
-			elif h_depth[i] < 0.45: b = "ocean"
-			else: b = "deepOcean"
-		elif h > mountain_cut: b = "mountain"
-		elif volcanism[i] > 0.55 and h > 0.06 and _stable_rand(fverts[i]) < 0.5: b = "volcanic"
-		elif t < 0.13: b = "iceCap"
-		elif h > hill_cut: b = "highlands"
-		elif t < 0.24: b = "tundra"
-		elif t < 0.42: b = "boreal" if m > 0.42 else "tundra"
-		elif m > 0.82 and h < 0.08 and t < 0.75 and _stable_rand(fverts[i] * 1.7) < 0.55: b = "wetland"
-		elif t < 0.70:
-			if m < 0.18: b = "desert"
-			elif m < 0.34: b = "steppe"
-			elif m < 0.50: b = "plains"
-			elif m < 0.64: b = "grassland"
-			else: b = "forest"
-		else:
-			if m < 0.16: b = "desert"
-			elif m < 0.42: b = "savanna"
-			elif m < 0.60: b = "grassland"
-			elif m < 0.78: b = "plains"
-			else: b = "rainforest"
-		f_biome[i] = bidx[b]
-
-	# ---------------- tile aggregation ----------------
-	var n_biomes: int = Data.biome_order.size()
+	# ---------------- gameplay tile aggregation ----------------
+	# every grid cell contributes to its nearest Goldberg tile (hill-climb
+	# through tile adjacency — coherent scan makes this near-O(1) per cell)
 	var tally := PackedInt32Array()
-	tally.resize(NT * n_biomes)
-	for i in range(NF):
-		tally[tile_of[i] * n_biomes + f_biome[i]] += 1
+	tally.resize(NT * TT_COUNT)
+	var t_elev_sum := PackedFloat32Array(); t_elev_sum.resize(NT)
+	var t_cnt := PackedInt32Array(); t_cnt.resize(NT)
+	var t_river := PackedByteArray(); t_river.resize(NT)
+	var centers_t: PackedVector3Array = tiles.centers
+	var off: PackedInt32Array = tiles.nbr_off
+	var nbr: PackedInt32Array = tiles.nbr
+	var cur_tile := 0
+	for x in range(W):
+		var lon := (float(x) + 0.5) / W * TAU
+		for y in range(H):
+			var lat := (float(y) + 0.5) / H * PI - PI / 2.0
+			var cos_lat := cos(lat)
+			var p := Vector3(cos_lat * sin(lon), sin(lat), cos_lat * cos(lon))
+			# hill-climb to the nearest tile center
+			var best := cur_tile
+			var best_d := centers_t[best].dot(p)
+			var improved := true
+			while improved:
+				improved = false
+				for e in range(off[best], off[best + 1]):
+					var cand := nbr[e]
+					var d := centers_t[cand].dot(p)
+					if d > best_d:
+						best_d = d
+						best = cand
+						improved = true
+			cur_tile = best
+			var idx := y * W + x
+			tally[best * TT_COUNT + ttype[idx]] += 1
+			t_elev_sum[best] += elev[idx]
+			t_cnt[best] += 1
+			if ttype[idx] == TT.RIVER:
+				t_river[best] = 1
+
+	# dominant type, biome mapping, district slots (largest remainder)
 	var t_biome: Array = []
 	t_biome.resize(NT)
+	var t_ttype := PackedByteArray(); t_ttype.resize(NT)
 	var t_land := PackedByteArray(); t_land.resize(NT)
-	# district slots: each tile gets SLOTS building slots apportioned from the
-	# biome composition it spans (largest-remainder method) — e.g. a tile that
-	# is 70% forest / 20% ocean / 10% desert -> 5 forest, 2 ocean, 1 desert
 	var t_slots: Array = []
 	t_slots.resize(NT)
 	for ti in range(NT):
-		var best_b := 0
+		var best_tt := 0
 		var best_c := -1
 		var total := 0
-		for b in range(n_biomes):
-			var c := tally[ti * n_biomes + b]
+		for b in range(TT_COUNT):
+			var c := tally[ti * TT_COUNT + b]
 			total += c
 			if c > best_c:
 				best_c = c
-				best_b = b
-		var bid: String = Data.biome_order[best_b]
+				best_tt = b
+		if total == 0:
+			# tiny tile got no cells (shouldn't happen at 1024x512 vs <6k tiles)
+			best_tt = TT.OCEAN
+			tally[ti * TT_COUNT + TT.OCEAN] = 1
+			total = 1
+		t_ttype[ti] = best_tt
+		var bid: String = TT_TO_BIOME[best_tt]
 		t_biome[ti] = bid
 		t_land[ti] = 0 if Data.biomes[bid].water else 1
 		# --- largest-remainder apportionment into SLOTS_PER_TILE slots ---
-		var quotas: Array = []   # [biome_idx, floor_count, remainder]
+		var quotas: Array = []
 		var assigned := 0
-		for b in range(n_biomes):
-			var c := tally[ti * n_biomes + b]
+		for b in range(TT_COUNT):
+			var c := tally[ti * TT_COUNT + b]
 			if c == 0:
 				continue
-			var exact: float = float(c) * SLOTS_PER_TILE / maxf(1.0, float(total))
+			var exact := float(c) * SLOTS_PER_TILE / float(total)
 			var fl := int(floor(exact))
 			quotas.append([b, fl, exact - fl])
 			assigned += fl
-		quotas.sort_custom(func(x, y): return x[2] > y[2])
+		quotas.sort_custom(func(a, b): return a[2] > b[2])
 		var qi := 0
 		while assigned < SLOTS_PER_TILE and not quotas.is_empty():
 			quotas[qi % quotas.size()][1] += 1
 			assigned += 1
 			qi += 1
-		# emit slots grouped by count (dominant biome first)
-		quotas.sort_custom(func(x, y): return x[1] > y[1])
+		quotas.sort_custom(func(a, b): return a[1] > b[1])
 		var slots := PackedInt32Array()
 		for q: Array in quotas:
+			var slot_bid: String = TT_TO_BIOME[q[0]]
+			var bio_idx: int = Data.biome_index[slot_bid]
 			for k in range(q[1]):
-				slots.append(q[0])
+				slots.append(bio_idx)
 		while slots.size() > SLOTS_PER_TILE:
 			slots.remove_at(slots.size() - 1)
 		while slots.size() < SLOTS_PER_TILE:
-			slots.append(best_b)
+			slots.append(Data.biome_index[bid])
 		t_slots[ti] = slots
 
-	# tile deposits (biome-weighted, seeded)
-	var dep_rng := _seeded_rng(seed_str, "deposits")
+	# ---------------- tile deposits (biome-weighted, seeded) ----------------
+	var dep_rng := RandomNumberGenerator.new()
+	dep_rng.seed = hash(seed_str + "|deposits")
 	var t_deposit: Array = []
 	t_deposit.resize(NT)
-	var dep_base: float = 0.020 * float(P.resource_richness) * 0.0
-	dep_base = 0.020 * float(P.resource_richness)
+	var dep_base: float = 0.020 * float(P.resource_richness)
 	for ti in range(NT):
 		t_deposit[ti] = ""
 		var b: String = t_biome[ti]
@@ -502,348 +357,610 @@ static func generate(user_params: Dictionary) -> Dictionary:
 		if t_land[ti] == 1:
 			land_tiles.append(ti)
 
-	var t_sim := Time.get_ticks_msec() - t0
-
-	# ============ HIGH-RESOLUTION RENDER FIELD ============
-	# land proximity over water (for coast classification at render res)
-	var land_dist := PackedFloat32Array()
-	land_dist.resize(NF)
-	land_dist.fill(99.0)
-	var ld_q: Array = []
-	for i in range(NF):
-		if is_land[i] == 1:
-			land_dist[i] = 0.0
-			ld_q.append(i)
-	var ld_head := 0
-	while ld_head < ld_q.size():
-		var cur: int = ld_q[ld_head]
-		ld_head += 1
-		if land_dist[cur] >= 6.0:
-			continue
-		for e in range(foff[cur], foff[cur + 1]):
-			var nb := fnbr[e]
-			if land_dist[nb] > land_dist[cur] + 1.0:
-				land_dist[nb] = land_dist[cur] + 1.0
-				ld_q.append(nb)
-
-	var render := SphereGrid.build_render_grid(P.tile_freq * int(P.detail))
-	var NR: int = render.n
-
-	# detail noises evaluated per render vertex
-	var nz_relief := FastNoiseLite.new()
-	nz_relief.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	nz_relief.fractal_type = FastNoiseLite.FRACTAL_FBM
-	nz_relief.fractal_octaves = 3
-	nz_relief.frequency = 14.0
-	nz_relief.seed = hash(seed_str + "|relief")
-	var nz_jit := FastNoiseLite.new()
-	nz_jit.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	nz_jit.fractal_type = FastNoiseLite.FRACTAL_NONE
-	nz_jit.frequency = 26.0
-	nz_jit.seed = hash(seed_str + "|jitter")
-
-	# biome color LUT + special indices for the shading pass
-	var n_biomes2: int = Data.biome_order.size()
-	var biome_cols := PackedColorArray()
-	biome_cols.resize(n_biomes2)
-	for b2 in range(n_biomes2):
-		biome_cols[b2] = Color(Data.biomes[Data.biome_order[b2]].color)
-
-	var ctx := {
-		"NR": NR, "M": P.tile_freq * SIM_DETAIL, "k2": float(int(P.detail) / SIM_DETAIL),
-		"rverts": render.verts, "vface": render.vface, "vi": render.vi, "vj": render.vj,
-		"face_grids": fine.face_grids,
-		"s_elev": elev, "s_temp": temp, "s_moist": moist, "s_volc": volcanism,
-		"s_lake": is_lake, "s_landd": land_dist,
-		"sea": sea, "emax": emax, "emin": emin,
-		"mcut": mountain_cut, "hcut": hill_cut,
-		"nz_relief": nz_relief, "nz_jit": nz_jit,
-		"bidx": Data.biome_index, "bcols": biome_cols,
-		"results": [],
-	}
-	var n_chunks: int = clampi(OS.get_processor_count(), 2, 16)
-	ctx.chunks = n_chunks
-	for c2 in range(n_chunks):
-		ctx.results.append(null)
-	var gid := WorkerThreadPool.add_group_task(func(chunk: int) -> void: _render_chunk(ctx, chunk), n_chunks)
-	WorkerThreadPool.wait_for_group_task_completion(gid)
-
-	var r_biome := PackedInt32Array()
-	var r_hland := PackedFloat32Array()
-	var r_hdepth := PackedFloat32Array()
-	var r_land := PackedByteArray()
-	var r_temp := PackedFloat32Array()
-	var r_colors := PackedColorArray()
-	var r_elev := PackedFloat32Array()
-	var r_moist := PackedFloat32Array()
-	var r_volc := PackedFloat32Array()
-	var r_lake := PackedFloat32Array()
-	var r_landd := PackedFloat32Array()
-	for c3 in range(n_chunks):
-		var res: Dictionary = ctx.results[c3]
-		r_biome.append_array(res.biome)
-		r_hland.append_array(res.hland)
-		r_hdepth.append_array(res.hdepth)
-		r_land.append_array(res.land)
-		r_temp.append_array(res.temp)
-		r_colors.append_array(res.colors)
-		r_elev.append_array(res.elev)
-		r_moist.append_array(res.moist)
-		r_volc.append_array(res.volc)
-		r_lake.append_array(res.lakem)
-		r_landd.append_array(res.landd)
-
-	print("worldgen: sim %d verts in %d ms | render %d verts in %d ms | %d tiles (%d land)" % [
-		NF, t_sim, NR, Time.get_ticks_msec() - t0 - t_sim, NT, land_tiles.size()])
+	print("worldgen(port): tec %dms | fill %dms | post %dms | aggregate+slots %dms | %d tiles (%d land)" % [
+		t_tec - t0, t_fill - t_tec, t_post - t_fill, Time.get_ticks_msec() - t_post, NT, land_tiles.size()])
 
 	return {
-		"params": P, "seed": seed_str,
-		"fine": fine, "tiles": tiles, "tile_of_fine": tile_of,
-		"NF": NF, "NT": NT,
-		"f_elev": elev, "f_hland": h_land, "f_hdepth": h_depth,
-		"f_land": is_land, "f_lake": is_lake, "f_temp": temp, "f_moist": moist,
-		"f_biome": f_biome, "f_plate": plate_of, "f_volcanism": volcanism,
-		"mountain_cut": mountain_cut, "hill_cut": hill_cut,
-		"t_biome": t_biome, "t_land": t_land, "t_deposit": t_deposit,
+		"params": P, "seed": seed_str, "sea": sea,
+		"tiles": tiles, "NT": NT,
+		"grid": {"W": W, "H": H, "elev": elev, "moist": moist, "geo": geo,
+			"tvar": tvar, "ttype": ttype, "mask": mask},
+		"t_biome": t_biome, "t_ttype": t_ttype, "t_land": t_land,
+		"t_deposit": t_deposit, "t_river": t_river,
 		"t_slots": t_slots, "slots_per_tile": SLOTS_PER_TILE,
 		"land_tiles": land_tiles,
-		"render": render, "NR": NR,
-		"r_biome": r_biome, "r_hland": r_hland, "r_hdepth": r_hdepth,
-		"r_land": r_land, "r_temp": r_temp, "r_colors": r_colors,
-		"r_elev": r_elev, "r_moist": r_moist, "r_volc": r_volc,
-		"r_lake": r_lake, "r_landd": r_landd,
-		"sea": sea, "emax": emax, "emin": emin,
+		"temp_bias": float(P.temperature), "moist_bias": float(P.humidity),
 	}
 
 
-## Threaded per-render-vertex pass: barycentric interpolation of the sim
-## fields, relief detail noise, biome classification and terrain shading.
-static func _render_chunk(ctx: Dictionary, chunk: int) -> void:
-	var NR: int = ctx.NR
-	var chunks: int = ctx.chunks
-	var start: int = NR * chunk / chunks
-	var end: int = NR * (chunk + 1) / chunks
-	var count: int = end - start
+# ---------------- pass 1: tectonic field ----------------
 
-	var rverts: PackedVector3Array = ctx.rverts
-	var vface: PackedInt32Array = ctx.vface
-	var vi_a: PackedInt32Array = ctx.vi
-	var vj_a: PackedInt32Array = ctx.vj
-	var face_grids: Array = ctx.face_grids
-	var s_elev: PackedFloat32Array = ctx.s_elev
-	var s_temp: PackedFloat32Array = ctx.s_temp
-	var s_moist: PackedFloat32Array = ctx.s_moist
-	var s_volc: PackedFloat32Array = ctx.s_volc
-	var s_lake: PackedByteArray = ctx.s_lake
-	var s_landd: PackedFloat32Array = ctx.s_landd
-	var M: int = ctx.M
-	var k2: float = ctx.k2
+static func _tectonic_chunk(ctx: Dictionary, chunk: int) -> void:
+	var W: int = ctx.W
+	var H: int = ctx.H
+	var x0: int = W * chunk / int(ctx.chunks)
+	var x1: int = W * (chunk + 1) / int(ctx.chunks)
+	var centers: PackedVector3Array = ctx.centers
+	var is_conti: Array = ctx.is_conti
+	var drifts: PackedVector3Array = ctx.drifts
+	var stress: PackedFloat32Array = ctx.stress
+	var field: PackedFloat32Array = ctx.tec_field
+	var lo_x: FastNoiseLite = ctx.w_lo_x
+	var lo_y: FastNoiseLite = ctx.w_lo_y
+	var lo_z: FastNoiseLite = ctx.w_lo_z
+	var hi_x: FastNoiseLite = ctx.w_hi_x
+	var hi_y: FastNoiseLite = ctx.w_hi_y
+	var hi_z: FastNoiseLite = ctx.w_hi_z
+	const CONTI_BASE := 0.06
+	const OCEAN_BASE := -0.05
+	const MOUNTAIN_BONUS := 0.18
+	const RIFT_DEPTH := 0.04
+	const BOUNDARY_WIDTH := 0.07
+	const WARP_LO := 0.38
+	const WARP_HI := 0.11
+	const BLEND_WIDTH := 0.16
+
+	for x in range(x0, x1):
+		var lon := float(x) / W * TAU
+		for y in range(H):
+			var idx := y * W + x
+			var lat := float(y) / H * PI - PI / 2.0
+			var cos_lat := cos(lat)
+			var p := Vector3(cos_lat * sin(lon), sin(lat), cos_lat * cos(lon))
+			var pw := Vector3(
+				p.x + lo_x.get_noise_3dv(p) * WARP_LO + hi_x.get_noise_3dv(p) * WARP_HI,
+				p.y + lo_y.get_noise_3dv(p) * WARP_LO + hi_y.get_noise_3dv(p) * WARP_HI,
+				p.z + lo_z.get_noise_3dv(p) * WARP_LO + hi_z.get_noise_3dv(p) * WARP_HI
+			).normalized()
+
+			var d1 := 1e30
+			var d2 := 1e30
+			var i1 := 0
+			var i2 := 1
+			for k in range(PLATE_COUNT):
+				var d := (pw - centers[k]).length_squared()
+				if d < d1:
+					d2 = d1; i2 = i1
+					d1 = d; i1 = k
+				elif d < d2:
+					d2 = d; i2 = k
+
+			var d_bound := sqrt(d2) - sqrt(d1)
+			var alpha := clampf(d_bound / BLEND_WIDTH, 0.0, 1.0)
+			var sm := alpha * alpha * (3.0 - 2.0 * alpha)
+			var base1: float = CONTI_BASE if is_conti[i1] else OCEAN_BASE
+			var base2: float = CONTI_BASE if is_conti[i2] else OCEAN_BASE
+			var e := base1 * sm + (base1 + base2) * 0.5 * (1.0 - sm)
+
+			var bdp := maxf(0.0, 1.0 - d_bound / BOUNDARY_WIDTH)
+			var conv := 0.0
+			if bdp > 0.0:
+				var b_norm := (centers[i2] - centers[i1]).normalized()
+				conv = (drifts[i1] - drifts[i2]).dot(b_norm)
+				if conv > 0.0 and (is_conti[i1] or is_conti[i2]):
+					e += MOUNTAIN_BONUS * bdp * minf(conv, 1.0)
+				elif conv < 0.0 and not is_conti[i1] and not is_conti[i2]:
+					e -= RIFT_DEPTH * bdp * minf(-conv, 1.0)
+
+			stress[idx] = conv * bdp
+			field[idx] = e
+
+
+# ---------------- pass 2: fill (elevation / moisture / classify) ----------------
+
+static func _fill_chunk(ctx: Dictionary, chunk: int) -> void:
+	var W: int = ctx.W
+	var H: int = ctx.H
+	var x0: int = W * chunk / int(ctx.chunks)
+	var x1: int = W * (chunk + 1) / int(ctx.chunks)
 	var sea: float = ctx.sea
-	var emax: float = ctx.emax
-	var emin: float = ctx.emin
-	var mcut: float = ctx.mcut
-	var hcut: float = ctx.hcut
-	var nz_relief: FastNoiseLite = ctx.nz_relief
-	var nz_jit: FastNoiseLite = ctx.nz_jit
-	var bidx: Dictionary = ctx.bidx
-	var bcols: PackedColorArray = ctx.bcols
+	var temp_bias: float = ctx.temp_bias
+	var moist_bias: float = ctx.moist_bias
+	var elev: PackedFloat32Array = ctx.elev
+	var moist: PackedFloat32Array = ctx.moist
+	var geo_a: PackedFloat32Array = ctx.geo
+	var tvar: PackedFloat32Array = ctx.tvar
+	var ttype: PackedByteArray = ctx.ttype
+	var stress: PackedFloat32Array = ctx.stress
+	var tec_field: PackedFloat32Array = ctx.tec_field
+	var n_cont: FastNoiseLite = ctx.n_cont
+	var n_detail: FastNoiseLite = ctx.n_detail
+	var n_moist: FastNoiseLite = ctx.n_moist
+	var n_mdetail: FastNoiseLite = ctx.n_mdetail
+	var n_geo: FastNoiseLite = ctx.n_geo
+	var n_ridge: FastNoiseLite = ctx.n_ridge
+	var n_tv: FastNoiseLite = ctx.n_tv
 
-	# biome int ids
-	var B_ICE: int = bidx["iceCap"]
-	var B_LAKE: int = bidx["lake"]
-	var B_COAST: int = bidx["coast"]
-	var B_OCEAN: int = bidx["ocean"]
-	var B_DEEP: int = bidx["deepOcean"]
-	var B_MOUNTAIN: int = bidx["mountain"]
-	var B_VOLC: int = bidx["volcanic"]
-	var B_HIGH: int = bidx["highlands"]
-	var B_TUNDRA: int = bidx["tundra"]
-	var B_BOREAL: int = bidx["boreal"]
-	var B_WET: int = bidx["wetland"]
-	var B_DESERT: int = bidx["desert"]
-	var B_STEPPE: int = bidx["steppe"]
-	var B_PLAINS: int = bidx["plains"]
-	var B_GRASS: int = bidx["grassland"]
-	var B_FOREST: int = bidx["forest"]
-	var B_SAV: int = bidx["savanna"]
-	var B_RAIN: int = bidx["rainforest"]
+	for x in range(x0, x1):
+		var lon := float(x) / W * TAU
+		for y in range(H):
+			var idx := y * W + x
+			var lat := float(y) / H * PI - PI / 2.0
+			var cos_lat := cos(lat)
+			var p := Vector3(cos_lat * sin(lon), sin(lat), cos_lat * cos(lon))
+			var latitude := absf(float(y) / H * 2.0 - 1.0)
 
-	var SNOW := Color(0.94, 0.95, 0.97)
-	var SAND := Color(0.90, 0.85, 0.66)
-	var ICE_TINT := Color(0.8, 0.87, 0.93)
-	var deep_col: Color = bcols[B_DEEP]
-	var deep_dark := deep_col * 0.72
-	var ocean_col: Color = bcols[B_OCEAN]
-	var mnt_col: Color = bcols[B_MOUNTAIN]
+			var c := (n_cont.get_noise_3dv(p) + 1.0) * 0.5
+			var d := (n_detail.get_noise_3dv(p) + 1.0) * 0.5
+			var r := (n_ridge.get_noise_3dv(p) + 1.0) * 0.5
+			var e := c * 0.65 + d * 0.35
 
-	var o_biome := PackedInt32Array(); o_biome.resize(count)
-	var o_hland := PackedFloat32Array(); o_hland.resize(count)
-	var o_hdepth := PackedFloat32Array(); o_hdepth.resize(count)
-	var o_land := PackedByteArray(); o_land.resize(count)
-	var o_temp := PackedFloat32Array(); o_temp.resize(count)
-	var o_cols := PackedColorArray(); o_cols.resize(count)
-	# raw fields for the per-fragment terrain shader (elev pre-relief-noise:
-	# the shader adds its own high-frequency relief so coastlines stay crisp
-	# below triangle resolution)
-	var o_elev := PackedFloat32Array(); o_elev.resize(count)
-	var o_moist := PackedFloat32Array(); o_moist.resize(count)
-	var o_volc := PackedFloat32Array(); o_volc.resize(count)
-	var o_lakem := PackedFloat32Array(); o_lakem.resize(count)
-	var o_landd := PackedFloat32Array(); o_landd.resize(count)
+			# polar icecap: jittered land-lift keeps the cap edge organic
+			var pole_jitter := (c * 0.6 + d * 0.4 - 0.5) * 0.06
+			var pole_land := clampf((latitude + pole_jitter - 0.92) / 0.05, 0.0, 1.0)
+			pole_land = pole_land * pole_land * (3.0 - 2.0 * pole_land)
+			e += pole_land * 0.16
+			# gentle polar depression keeps poles ocean-dominated elsewhere
+			e -= pow(latitude, 4.0) * 0.08
 
-	for v in range(start, end):
-		var o := v - start
-		var p := rverts[v]
-		# ---- barycentric weights within the sim-grid triangle ----
-		var u: float = float(vi_a[v]) / k2
-		var w: float = float(vj_a[v]) / k2
-		var I0 := clampi(int(floor(u)), 0, M - 1)
-		var J0 := clampi(int(floor(w)), 0, M - 1)
-		# the face grid is triangular (row i has M+1-i entries), so the cell
-		# must satisfy I0 + J0 <= M - 1; vertices on the diagonal edge
-		# (u + w == M) would otherwise index past the row ends
-		if I0 + J0 > M - 1:
-			if J0 >= I0:
-				J0 = M - 1 - I0
+			e += maxf(0.0, e - sea) * r * 1.2
+			e += tec_field[idx]
+
+			var m_global := (n_moist.get_noise_3dv(p) + 1.0) * 0.5
+			var m_local := (n_mdetail.get_noise_3dv(p) + 1.0) * 0.5
+			var m_raw := m_global * (1.0 - MOISTURE_DETAIL_BLEND) + m_local * MOISTURE_DETAIL_BLEND
+			var itcz := exp(-latitude * latitude * 15.0) * 0.18
+			var hadley := exp(-(latitude - 0.25) * (latitude - 0.25) * 30.0) * 0.32
+			var moisture := clampf(m_raw * 0.72 + (0.24 + itcz - hadley) * 0.28, 0.0, 1.0)
+
+			# tectonic rain shadow (upwind stress by latitude band)
+			var tec_stress := stress[idx]
+			if tec_stress > 0.05:
+				var wind_sign := 1.0 if (latitude < 0.33 or latitude > 0.65) else -1.0
+				var up_x := posmod(x + int(wind_sign * 5.0), W)
+				var up_stress := stress[y * W + up_x]
+				moisture = clampf(moisture - maxf(tec_stress, up_stress) * 0.22, 0.0, 1.0)
+
+			var geo := (n_geo.get_noise_3dv(p) + 1.0) * 0.5
+			if tec_stress > 0.08:
+				geo = clampf(geo + tec_stress * 0.45, 0.0, 1.0)
+
+			var tv := (n_tv.get_noise_3dv(p) + 1.0) * 0.5
+
+			elev[idx] = e
+			moist[idx] = moisture
+			geo_a[idx] = geo
+			tvar[idx] = tv
+			ttype[idx] = classify(e, latitude, moisture, geo, tv, sea, temp_bias, moist_bias)
+
+
+## Whittaker classification — direct port of ClassifyTile
+static func classify(e: float, latitude: float, moisture: float, geo: float, tv: float,
+		sea: float, temp_bias: float, moist_bias: float) -> int:
+	moisture = clampf(moisture + moist_bias, 0.0, 1.0)
+	var sea_temp := 1.0 - latitude
+
+	if e < sea - SHALLOW_OFFSET:
+		return TT.OCEAN
+	if e < sea:
+		return TT.CORAL if (latitude < 0.14 and moisture < 0.52) else TT.SHALLOW
+	if e < sea + BEACH_OFFSET:
+		if latitude < 0.22 and moisture > 0.62:
+			return TT.MANGROVE
+		if moisture > 0.72 and sea_temp > 0.38:
+			return TT.SWAMP
+		return TT.BEACH
+	if e < sea + BEACH_OFFSET + 0.05 and moisture > 0.76 and sea_temp > 0.38:
+		return TT.SWAMP
+
+	var alt_chill := maxf(0.0, (e - sea) / (MOUNTAIN_LEVEL - sea)) * 0.5
+	var temp := clampf(1.0 - latitude - alt_chill + temp_bias + (tv - 0.5) * TEMP_VARIATION_STRENGTH, 0.0, 1.0)
+	var temp_no_alt := clampf(1.0 - latitude + temp_bias + (tv - 0.5) * TEMP_VARIATION_STRENGTH, 0.0, 1.0)
+	if temp_no_alt < 0.12:
+		return TT.ICECAP
+
+	if e >= SNOW_PEAK_LEVEL:
+		return TT.SNOW_PEAK if temp_no_alt <= 0.55 else TT.MOUNTAIN
+	if e >= MOUNTAIN_LEVEL:
+		return TT.VOLCANO if geo > VOLCANIC_RATE else TT.MOUNTAIN
+	if e >= MOUNTAIN_LEVEL - 0.08:
+		var alpine_temp := clampf(1.0 - latitude - 0.35, 0.0, 1.0)
+		return TT.ALPINE_MEADOW if alpine_temp > 0.22 else TT.TUNDRA
+
+	if temp < 0.28:
+		return TT.TAIGA if moisture > 0.48 else TT.TUNDRA
+	if temp < 0.46:
+		if moisture > 0.60: return TT.TAIGA
+		if moisture > 0.42: return TT.PINE_FOREST
+		if moisture > 0.26: return TT.GRASSLAND
+		return TT.STEPPE if moisture > 0.12 else TT.TUNDRA
+	if temp < 0.68:
+		if moisture > 0.70: return TT.SWAMP
+		if moisture > 0.50: return TT.TEMPERATE_FOREST
+		if moisture > 0.34: return TT.GRASSLAND
+		if moisture > 0.20: return TT.SHRUBLAND
+		return TT.DESERT
+	if moisture > 0.68: return TT.JUNGLE
+	if moisture > 0.48: return TT.TROPICAL_FOREST
+	if moisture > 0.32: return TT.SAVANNA
+	if moisture > 0.22: return TT.SHRUBLAND
+	if moisture > 0.07: return TT.DESERT
+	return TT.SALT_FLAT
+
+
+static func is_water_tt(t: int) -> bool:
+	return t == TT.OCEAN or t == TT.SHALLOW or t == TT.CORAL or t == TT.LAKE
+
+
+# ---------------- post passes (ports) ----------------
+
+static func _fill_lakes(ttype: PackedByteArray, mask: PackedByteArray, W: int, H: int) -> void:
+	var N := W * H
+	var main_ocean := PackedByteArray()
+	main_ocean.resize(N)
+	# flood water (+icecap) from the top and bottom rows — the polar oceans
+	var q := PackedInt32Array()
+	for x in range(W):
+		for start_i in [x, (H - 1) * W + x]:
+			var t := ttype[start_i]
+			if main_ocean[start_i] == 0 and (is_water_tt(t) or t == TT.ICECAP):
+				main_ocean[start_i] = 1
+				q.append(start_i)
+	var head := 0
+	while head < q.size():
+		var i := q[head]
+		head += 1
+		var x := i % W
+		var y := i / W
+		for nb in [y * W + posmod(x - 1, W), y * W + posmod(x + 1, W),
+				(y - 1) * W + x if y > 0 else -1, (y + 1) * W + x if y < H - 1 else -1]:
+			if nb < 0 or main_ocean[nb] == 1:
+				continue
+			var t2 := ttype[nb]
+			if is_water_tt(t2) or t2 == TT.ICECAP:
+				main_ocean[nb] = 1
+				q.append(nb)
+
+	# classify disconnected water bodies
+	var processed := PackedByteArray()
+	processed.resize(N)
+	var body := PackedInt32Array()
+	for i in range(N):
+		if processed[i] == 1 or main_ocean[i] == 1 or not is_water_tt(ttype[i]):
+			continue
+		body.clear()
+		var bq := PackedInt32Array([i])
+		processed[i] = 1
+		var bh := 0
+		while bh < bq.size():
+			var ci := bq[bh]
+			bh += 1
+			body.append(ci)
+			var cx := ci % W
+			var cy := ci / W
+			for nb2 in [cy * W + posmod(cx - 1, W), cy * W + posmod(cx + 1, W),
+					(cy - 1) * W + cx if cy > 0 else -1, (cy + 1) * W + cx if cy < H - 1 else -1]:
+				if nb2 < 0 or processed[nb2] == 1 or main_ocean[nb2] == 1:
+					continue
+				if is_water_tt(ttype[nb2]):
+					processed[nb2] = 1
+					bq.append(nb2)
+		var fill: int
+		var m: int
+		if body.size() >= MAX_LAKE_SIZE:
+			fill = TT.OCEAN
+			m = MASK.NONE
+		elif body.size() >= MIN_LAKE_SIZE:
+			fill = TT.LAKE
+			m = MASK.LAKE
+		else:
+			fill = TT.GRASSLAND
+			m = MASK.LAND_FILL
+		for bi in body:
+			ttype[bi] = fill
+			mask[bi] = m
+
+
+static func _smooth_lakes(ttype: PackedByteArray, mask: PackedByteArray, W: int, H: int, ctx: Dictionary) -> void:
+	var N := W * H
+	var to_change := PackedByteArray()
+	to_change.resize(N)
+	for iter in range(4):
+		for i in range(N):
+			to_change[i] = 0
+		var sctx := {"W": W, "H": H, "ttype": ttype, "to_change": to_change, "chunks": ctx.chunks}
+		var gid := WorkerThreadPool.add_group_task(func(c: int) -> void: _smooth_check_chunk(sctx, c), int(ctx.chunks))
+		WorkerThreadPool.wait_for_group_task_completion(gid)
+		for i in range(N):
+			if to_change[i] == 1:
+				ttype[i] = TT.LAKE
+				mask[i] = MASK.LAKE
+			elif to_change[i] == 2:
+				ttype[i] = TT.GRASSLAND
+				mask[i] = MASK.LAND_FILL
+
+
+static func _smooth_check_chunk(ctx: Dictionary, chunk: int) -> void:
+	var W: int = ctx.W
+	var H: int = ctx.H
+	var x0: int = W * chunk / int(ctx.chunks)
+	var x1: int = W * (chunk + 1) / int(ctx.chunks)
+	var ttype: PackedByteArray = ctx.ttype
+	var to_change: PackedByteArray = ctx.to_change
+	for x in range(x0, x1):
+		for y in range(H):
+			var lake_nb := 0
+			var total := 0
+			for dy in range(-1, 2):
+				var ny := y + dy
+				if ny < 0 or ny >= H:
+					continue
+				for dx in range(-1, 2):
+					if dx == 0 and dy == 0:
+						continue
+					total += 1
+					if ttype[ny * W + posmod(x + dx, W)] == TT.LAKE:
+						lake_nb += 1
+			if total == 0:
+				continue
+			var frac := float(lake_nb) / total
+			var i := y * W + x
+			var t := ttype[i]
+			if t == TT.LAKE and frac < 0.30:
+				to_change[i] = 2
+			elif t != TT.LAKE and not is_water_tt(t) and t != TT.RIVER and frac >= 0.65:
+				to_change[i] = 1
+
+
+static func _remove_tiny_islands(ttype: PackedByteArray, mask: PackedByteArray, W: int, H: int) -> void:
+	var N := W * H
+	var visited := PackedByteArray()
+	visited.resize(N)
+	var body := PackedInt32Array()
+	for i in range(N):
+		if visited[i] == 1:
+			continue
+		if is_water_tt(ttype[i]):
+			visited[i] = 1
+			continue
+		body.clear()
+		var q := PackedInt32Array([i])
+		visited[i] = 1
+		var head := 0
+		while head < q.size():
+			var ci := q[head]
+			head += 1
+			body.append(ci)
+			var cx := ci % W
+			var cy := ci / W
+			for nb in [cy * W + posmod(cx - 1, W), cy * W + posmod(cx + 1, W),
+					(cy - 1) * W + cx if cy > 0 else -1, (cy + 1) * W + cx if cy < H - 1 else -1]:
+				if nb < 0 or visited[nb] == 1:
+					continue
+				if not is_water_tt(ttype[nb]):
+					visited[nb] = 1
+					q.append(nb)
+		if body.size() < MIN_ISLAND_SIZE:
+			for bi in body:
+				ttype[bi] = TT.OCEAN
+				mask[bi] = MASK.OCEAN_FILL
+
+
+static func _ensure_coastal_water(ttype: PackedByteArray, mask: PackedByteArray, W: int, H: int) -> void:
+	var N := W * H
+	var depth := PackedInt32Array()
+	depth.resize(N)
+	depth.fill(-1)
+	var q := PackedInt32Array()
+	for i in range(N):
+		if not is_water_tt(ttype[i]):
+			depth[i] = 0
+			q.append(i)
+	var head := 0
+	while head < q.size():
+		var i := q[head]
+		head += 1
+		var d := depth[i]
+		if d >= COASTAL_STRIP_WIDTH:
+			continue
+		var x := i % W
+		var y := i / W
+		for nb in [y * W + posmod(x - 1, W), y * W + posmod(x + 1, W),
+				(y - 1) * W + x if y > 0 else -1, (y + 1) * W + x if y < H - 1 else -1]:
+			if nb < 0 or depth[nb] != -1:
+				continue
+			if ttype[nb] != TT.OCEAN:
+				continue
+			depth[nb] = d + 1
+			ttype[nb] = TT.SHALLOW
+			mask[nb] = MASK.SHALLOW
+			q.append(nb)
+
+
+## Priority-Flood depression filling (Barnes et al.) — binary heap port
+static func _fill_depressions(elev: PackedFloat32Array, sea: float, W: int, H: int) -> PackedFloat32Array:
+	var N := W * H
+	var filled := elev.duplicate()
+	var in_queue := PackedByteArray()
+	in_queue.resize(N)
+	# binary min-heap of (key, idx)
+	var heap_k := PackedFloat32Array()
+	var heap_i := PackedInt32Array()
+
+	var push := func(idx: int, key: float) -> void:
+		heap_k.append(key)
+		heap_i.append(idx)
+		var c := heap_k.size() - 1
+		while c > 0:
+			var par := (c - 1) >> 1
+			if heap_k[par] <= heap_k[c]:
+				break
+			var tk := heap_k[par]; heap_k[par] = heap_k[c]; heap_k[c] = tk
+			var ti := heap_i[par]; heap_i[par] = heap_i[c]; heap_i[c] = ti
+			c = par
+
+	for i in range(N):
+		if elev[i] < sea:
+			in_queue[i] = 1
+			push.call(i, elev[i])
+
+	while heap_k.size() > 0:
+		var e := heap_k[0]
+		var idx := heap_i[0]
+		# pop-min
+		var last := heap_k.size() - 1
+		heap_k[0] = heap_k[last]
+		heap_i[0] = heap_i[last]
+		heap_k.remove_at(last)
+		heap_i.remove_at(last)
+		var par2 := 0
+		while true:
+			var l := par2 * 2 + 1
+			if l >= heap_k.size():
+				break
+			var sm := l
+			if l + 1 < heap_k.size() and heap_k[l + 1] < heap_k[l]:
+				sm = l + 1
+			if heap_k[par2] <= heap_k[sm]:
+				break
+			var tk2 := heap_k[par2]; heap_k[par2] = heap_k[sm]; heap_k[sm] = tk2
+			var ti2 := heap_i[par2]; heap_i[par2] = heap_i[sm]; heap_i[sm] = ti2
+			par2 = sm
+
+		var x := idx % W
+		var y := idx / W
+		for ni in [y * W + posmod(x - 1, W), y * W + posmod(x + 1, W),
+				(y - 1) * W + x if y > 0 else -1, (y + 1) * W + x if y < H - 1 else -1]:
+			if ni < 0 or in_queue[ni] == 1:
+				continue
+			in_queue[ni] = 1
+			filled[ni] = maxf(filled[ni], e)
+			push.call(ni, filled[ni])
+	return filled
+
+
+static func _river_source_bias(t: int) -> float:
+	match t:
+		TT.ICECAP, TT.SNOW_PEAK: return -999.0
+		TT.TUNDRA, TT.DESERT: return -0.10
+		TT.SALT_FLAT: return -0.12
+		TT.STEPPE: return -0.05
+		TT.SHRUBLAND: return -0.02
+		TT.TAIGA: return 0.03
+		TT.PINE_FOREST: return 0.04
+		TT.TEMPERATE_FOREST, TT.TROPICAL_FOREST: return 0.05
+		TT.JUNGLE: return 0.06
+		TT.SAVANNA: return 0.01
+		TT.SWAMP: return 0.03
+		TT.MANGROVE: return 0.02
+		_: return 0.0
+
+
+static func _generate_rivers(ttype: PackedByteArray, mask: PackedByteArray,
+		orig_elev: PackedFloat32Array, route_elev: PackedFloat32Array, seed_i: int, W: int, H: int) -> void:
+	var src_threshold := MOUNTAIN_LEVEL - 0.14
+	const MAX_LEN := 600
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_i ^ 0x1A2B3C
+
+	var bx := 0
+	while bx < W:
+		var by := 0
+		while by < H:
+			var best_e := -1e30
+			var best_i := -1
+			for x in range(bx, mini(bx + RIVER_STRIDE, W)):
+				for y in range(by, mini(by + RIVER_STRIDE, H)):
+					var i := y * W + x
+					var e := orig_elev[i]
+					if e < src_threshold:
+						continue
+					var t := ttype[i]
+					if is_water_tt(t) or t == TT.RIVER:
+						continue
+					var score := e + _river_source_bias(t)
+					if score > best_e:
+						best_e = score
+						best_i = i
+			if best_i >= 0:
+				_flow_river(ttype, mask, route_elev, best_i, MAX_LEN, rng, W, H)
+			by += RIVER_STRIDE
+		bx += RIVER_STRIDE
+
+
+static func _nb8(i: int, W: int, H: int) -> PackedInt32Array:
+	var x := i % W
+	var y := i / W
+	var out := PackedInt32Array()
+	for dy in range(-1, 2):
+		var ny := y + dy
+		if ny < 0 or ny >= H:
+			continue
+		for dx in range(-1, 2):
+			if dx == 0 and dy == 0:
+				continue
+			out.append(ny * W + posmod(x + dx, W))
+	return out
+
+
+static func _flow_river(ttype: PackedByteArray, mask: PackedByteArray, route_elev: PackedFloat32Array,
+		source: int, max_len: int, rng: RandomNumberGenerator, W: int, H: int) -> void:
+	var best_e := route_elev[source]
+	var first := -1
+	for nb in _nb8(source, W, H):
+		if route_elev[nb] < best_e:
+			best_e = route_elev[nb]
+			first = nb
+	if first < 0:
+		return
+
+	var current := first
+	var visited := {source: true}
+	var wide_start := max_len / 5
+	var wider_start := max_len / 2
+
+	for step in range(max_len):
+		if visited.has(current):
+			break
+		var t := ttype[current]
+		if is_water_tt(t) or t == TT.RIVER or t == TT.ICECAP:
+			break
+		visited[current] = true
+		ttype[current] = TT.RIVER
+		mask[current] = MASK.RIVER
+
+		if step >= wide_start:
+			var x := current % W
+			var y := current / W
+			var width_nbs: Array
+			if step >= wider_start:
+				width_nbs = Array(_nb8(current, W, H))
 			else:
-				I0 = M - 1 - J0
-		var fu := u - I0
-		var fv := w - J0
-		var grid: Array = face_grids[vface[v]]
-		var ia: int; var ib: int; var ic: int
-		var wa: float; var wb: float; var wc: float
-		# diagonal cells only contain a lower triangle — never take the
-		# upper-triangle branch there even if float error pushes fu+fv past 1
-		if fu + fv <= 1.0 or I0 + J0 == M - 1:
-			ia = grid[I0][J0]; ib = grid[I0 + 1][J0]; ic = grid[I0][J0 + 1]
-			wa = 1.0 - fu - fv; wb = fu; wc = fv
+				width_nbs = [y * W + posmod(x - 1, W), y * W + posmod(x + 1, W)]
+				if y > 0: width_nbs.append((y - 1) * W + x)
+				if y < H - 1: width_nbs.append((y + 1) * W + x)
+			for nb2: int in width_nbs:
+				if visited.has(nb2):
+					continue
+				var nt := ttype[nb2]
+				if not is_water_tt(nt) and nt != TT.RIVER and nt != TT.ICECAP:
+					ttype[nb2] = TT.RIVER
+					mask[nb2] = MASK.RIVER
+
+		var cur_e := route_elev[current]
+		var steepest := -1
+		var steepest_e := 1e30
+		var downhill := PackedInt32Array()
+		for nb3 in _nb8(current, W, H):
+			if visited.has(nb3):
+				continue
+			var nb_e := route_elev[nb3]
+			if nb_e < cur_e:
+				downhill.append(nb3)
+				if nb_e < steepest_e:
+					steepest_e = nb_e
+					steepest = nb3
+		if downhill.size() == 0:
+			break
+		if downhill.size() > 1 and rng.randf() < 0.25:
+			current = downhill[rng.randi_range(0, downhill.size() - 1)]
 		else:
-			ia = grid[I0 + 1][J0 + 1]; ib = grid[I0][J0 + 1]; ic = grid[I0 + 1][J0]
-			wa = fu + fv - 1.0; wb = 1.0 - fu; wc = 1.0 - fv
-
-		var e: float = wa * s_elev[ia] + wb * s_elev[ib] + wc * s_elev[ic]
-		var t: float = wa * s_temp[ia] + wb * s_temp[ib] + wc * s_temp[ic]
-		var m: float = wa * s_moist[ia] + wb * s_moist[ib] + wc * s_moist[ic]
-		var volc: float = wa * s_volc[ia] + wb * s_volc[ib] + wc * s_volc[ic]
-		var lakem: float = wa * s_lake[ia] + wb * s_lake[ib] + wc * s_lake[ic]
-		var landd: float = wa * s_landd[ia] + wb * s_landd[ib] + wc * s_landd[ic]
-
-		o_elev[o] = e
-		o_moist[o] = m
-		o_volc[o] = volc
-		o_lakem[o] = lakem
-		o_landd[o] = landd
-
-		# render-scale relief detail (coastline wiggle, ridge texture)
-		e += nz_relief.get_noise_3dv(p) * 0.035
-
-		var land: bool = e >= sea
-		var h := 0.0
-		var hd := 0.0
-		if land:
-			h = clampf((e - sea) / maxf(1e-6, emax - sea), 0.0, 1.1)
-		else:
-			hd = clampf((sea - e) / maxf(1e-6, sea - emin), 0.0, 1.1)
-
-		# ---- biome classification (render resolution) ----
-		var b: int
-		if not land:
-			if t < 0.12: b = B_ICE
-			elif lakem > 0.5: b = B_LAKE
-			elif hd < 0.16 and landd <= 1.7: b = B_COAST
-			elif hd < 0.45: b = B_OCEAN
-			else: b = B_DEEP
-		elif h > mcut: b = B_MOUNTAIN
-		elif volc > 0.55 and h > 0.06 and _stable_rand(p) < 0.5: b = B_VOLC
-		elif t < 0.13: b = B_ICE
-		elif h > hcut: b = B_HIGH
-		elif t < 0.24: b = B_TUNDRA
-		elif t < 0.42: b = B_BOREAL if m > 0.42 else B_TUNDRA
-		elif m > 0.82 and h < 0.08 and t < 0.75 and _stable_rand(p * 1.7) < 0.55: b = B_WET
-		elif t < 0.70:
-			if m < 0.18: b = B_DESERT
-			elif m < 0.34: b = B_STEPPE
-			elif m < 0.50: b = B_PLAINS
-			elif m < 0.64: b = B_GRASS
-			else: b = B_FOREST
-		else:
-			if m < 0.16: b = B_DESERT
-			elif m < 0.42: b = B_SAV
-			elif m < 0.60: b = B_GRASS
-			elif m < 0.78: b = B_PLAINS
-			else: b = B_RAIN
-
-		# ---- terrain shading ----
-		var col: Color = bcols[b]
-		if not land:
-			if b == B_COAST:
-				col = col.lerp(ocean_col, clampf(hd * 3.5, 0.0, 0.55))
-			elif b == B_OCEAN:
-				col = col.lerp(deep_col, smoothstep(0.16, 0.5, hd))
-			elif b == B_DEEP:
-				col = col.lerp(deep_dark, smoothstep(0.5, 1.0, hd))
-			elif b == B_ICE:
-				col = col.lerp(ICE_TINT, 0.25)
-		else:
-			if b == B_MOUNTAIN:
-				col = col.lerp(SNOW, smoothstep(0.55, 0.9, h + (0.24 - minf(t, 0.24))))
-			elif b == B_HIGH:
-				col = col.lerp(mnt_col, smoothstep(hcut, mcut, h) * 0.5)
-			if t < 0.20 and b != B_ICE:
-				col = col.lerp(SNOW, (0.20 - t) / 0.20 * 0.55)
-			# shoreline beaches
-			if h < 0.02 and t > 0.30 and b != B_MOUNTAIN and b != B_HIGH and b != B_WET:
-				col = col.lerp(SAND, 0.5 * (1.0 - h / 0.02))
-		var j: float = nz_jit.get_noise_3dv(p) * 0.05 + (_stable_rand(p * 3.1) - 0.5) * 0.03
-		col = Color(clampf(col.r + j, 0, 1), clampf(col.g + j, 0, 1), clampf(col.b + j, 0, 1))
-
-		o_biome[o] = b
-		o_hland[o] = h
-		o_hdepth[o] = hd
-		o_land[o] = 1 if land else 0
-		o_temp[o] = t
-		o_cols[o] = col
-
-	ctx.results[chunk] = {
-		"biome": o_biome, "hland": o_hland, "hdepth": o_hdepth,
-		"land": o_land, "temp": o_temp, "colors": o_cols,
-		"elev": o_elev, "moist": o_moist, "volc": o_volc,
-		"lakem": o_lakem, "landd": o_landd,
-	}
+			current = steepest
 
 
-static func _has_land_nbr(i: int, foff: PackedInt32Array, fnbr: PackedInt32Array, is_land: PackedByteArray) -> bool:
-	for e in range(foff[i], foff[i + 1]):
-		if is_land[fnbr[e]] == 1:
-			return true
-	return false
+# ---------------- spawn points ----------------
 
-
-static func bump_walk(start: int, dirv: Vector3, bump0: float, steps: int, elev: PackedFloat32Array, volcanism: PackedFloat32Array, fine: Dictionary, detail: int) -> void:
-	var t := start
-	var bump := bump0
-	var fverts: PackedVector3Array = fine.verts
-	var foff: PackedInt32Array = fine.nbr_off
-	var fnbr: PackedInt32Array = fine.nbr
-	var decay: float = pow(0.78, 1.0 / detail)
-	for s in range(steps):
-		elev[t] += bump
-		volcanism[t] += 0.5
-		for e in range(foff[t], foff[t + 1]):
-			elev[fnbr[e]] += bump * 0.3
-		bump *= decay
-		var best := -1
-		var best_d := -1e9
-		for e in range(foff[t], foff[t + 1]):
-			var nb := fnbr[e]
-			var d := (fverts[nb] - fverts[t]).normalized().dot(dirv)
-			if d > best_d:
-				best_d = d
-				best = nb
-		t = best
-
-
-## Fertile, well-spread nation start tiles.
+## Fertile, well-spread nation start tiles (on the gameplay tile layer).
 static func pick_spawns(world: Dictionary, count: int) -> PackedInt32Array:
 	var tiles: Dictionary = world.tiles
 	var NT: int = world.NT
@@ -859,6 +976,8 @@ static func pick_spawns(world: Dictionary, count: int) -> PackedInt32Array:
 		if b.water or not b.allowsCity:
 			continue
 		var s: float = b.yields.food * 2.0 + b.yields.materials + b.yields.gold * 0.5
+		if world.t_river[i] == 1:
+			s += 2.0
 		var coastal := false
 		for e in range(off[i], off[i + 1]):
 			var nb_i := nbr[e]
@@ -877,7 +996,8 @@ static func pick_spawns(world: Dictionary, count: int) -> PackedInt32Array:
 			cand.append(i)
 	cand.sort_custom(func(a, b): return score[a] > score[b])
 	cand = cand.slice(0, maxi(count * 12, 120))
-	var rng := _seeded_rng(world.seed, "spawns")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(String(world.seed) + "|spawns")
 	var picked: Array = []
 	if cand.is_empty():
 		return PackedInt32Array()
