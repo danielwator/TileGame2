@@ -217,8 +217,10 @@ func set_overlay_colors(color_fn: Callable) -> void:
 
 # ---------------- nation borders ----------------
 
-## owner_of(tile)->int (-1 none), color_of(nation)->Color, show(tile)->bool
-func set_borders(owner_of: Callable, color_of: Callable, show: Callable) -> void:
+## owner_of(tile)->int (-1 none), color_of(nation)->Color, show(tile)->bool,
+## city_of(tile)->int (-1 if not part of a city) draws bright inner city rings
+func set_borders(owner_of: Callable, color_of: Callable, show: Callable,
+		city_of := Callable()) -> void:
 	if borders != null:
 		borders.queue_free()
 		borders = null
@@ -231,6 +233,8 @@ func set_borders(owner_of: Callable, color_of: Callable, show: Callable) -> void
 	var col := PackedColorArray()
 	var idx: Array = []
 	const INSET := 0.22
+	const CITY_INSET := 0.13
+	var has_city_fn := city_of.is_valid()
 	for ti in range(world.NT):
 		var o: int = owner_of.call(ti)
 		if o < 0:
@@ -241,21 +245,35 @@ func set_borders(owner_of: Callable, color_of: Callable, show: Callable) -> void
 		c.a = 0.85
 		var poly: PackedVector3Array = tiles.corners[ti]
 		var ctr: Vector3 = tiles.centers[ti] * BORDER_R
+		var my_city: int = city_of.call(ti) if has_city_fn else -1
 		for e in range(off[ti], off[ti + 1]):
-			if owner_of.call(nbr[e]) == o:
+			var nb := nbr[e]
+			var national_edge: bool = owner_of.call(nb) != o
+			# city ring: between this city's tiles and anything not in the same city
+			var city_edge: bool = my_city >= 0 and (not has_city_fn or city_of.call(nb) != my_city)
+			if not national_edge and not city_edge:
 				continue
 			var ca := edge_a[e]
 			var cb := edge_b[e]
 			if ca < 0:
 				continue
+			var use_c := c
+			var inset := INSET
+			if city_edge and not national_edge:
+				use_c = c.lerp(Color(1, 1, 1), 0.55)
+				use_c.a = 0.9
+				inset = CITY_INSET
+			elif city_edge and national_edge:
+				use_c = c.lerp(Color(1, 1, 1), 0.35)
+				use_c.a = 0.9
 			var p1: Vector3 = poly[ca] * BORDER_R
 			var p2: Vector3 = poly[cb] * BORDER_R
-			var q1 := p1.lerp(ctr, INSET)
-			var q2 := p2.lerp(ctr, INSET)
+			var q1 := p1.lerp(ctr, inset)
+			var q2 := p2.lerp(ctr, inset)
 			var base := pos.size()
 			pos.append(p1); pos.append(p2); pos.append(q2); pos.append(q1)
 			for k in range(4):
-				col.append(c)
+				col.append(use_c)
 			idx.append_array([base, base + 1, base + 2, base, base + 2, base + 3])
 	if pos.is_empty():
 		return

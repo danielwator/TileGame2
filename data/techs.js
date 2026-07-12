@@ -62,10 +62,10 @@
   def(1,'agri','animalHusbandry','Animal Husbandry',{unlockB:['pasture']},'Tamed beasts give milk, wool and muscle. Reveals Horses.');
   def(1,'agri','fishing','Fishing',{unlockB:['fishery']},'Nets and weirs harvest the shallows.',{pre:['hunting']});
   def(1,'agri','irrigation','Irrigation',{mod:{'b:farm':0.25}},'Ditches carry the river to the field.',{pre:['agriculture']});
-  def(1,'agri','pottery','Pottery',{unlockB:['granary'],mod:{food:0.05}},'Sealed jars defeat rot and rats.');
+  def(1,'agri','pottery','Pottery',{unlockB:['granary'],mod:{food:0.05,cityTiles:1}},'Sealed jars defeat rot and rats. +1 city tile.');
   def(1,'craft','toolmaking','Toolmaking',{mod:{materials:0.05}},'Flint, bone and antler shaped to purpose.');
   def(1,'craft','woodworking','Woodworking',{unlockB:['lumberCamp']},'Axes bite; timber becomes wall and hull.');
-  def(1,'craft','masonry','Masonry',{unlockB:['quarry']},'Dressed stone outlives its maker.');
+  def(1,'craft','masonry','Masonry',{unlockB:['quarry'],mod:{cityTiles:1}},'Dressed stone outlives its maker. +1 city tile.');
   def(1,'craft','wheel','The Wheel',{mod:{moveSpeed:0.10}},'Everything heavy suddenly rolls.');
   def(1,'craft','bronzeWorking','Bronze Working',{unlockB:['mine'],mod:{materials:0.05}},'Copper and tin marry into weapons-grade metal. Reveals Metal Ore.');
   def(1,'craft','tanning','Tanning',{mod:{def:0.05}},'Hides become armor, straps and tents.');
@@ -96,7 +96,7 @@
 
   /* ================= AGE 2 — CLASSICAL ================= */
   def(2,'agri','fallowing','Fallowing',{mod:{'b:farm':0.25}},'Rested fields yield double.');
-  def(2,'agri','aqueducts','Aqueducts',{unlockB:['aqueduct']},'Cities drink from mountains a valley away.');
+  def(2,'agri','aqueducts','Aqueducts',{unlockB:['aqueduct'],mod:{cityTiles:1}},'Cities drink from mountains a valley away. +1 city tile.');
   def(2,'agri','viticulture','Viticulture',{mod:{food:0.05,gold:0.05}},'Vines turn hillsides into festivals.');
   def(2,'agri','beekeeping','Beekeeping',{mod:{food:0.05}},'Sweetness, wax and better harvests.');
   def(2,'agri','fishSalting','Fish Salting',{mod:{'b:fishery':0.25}},'Fleets can now feed inland cities.');
@@ -125,7 +125,7 @@
   def(2,'sci','classicalMedicine','Classical Medicine',{mod:{healRate:0.25}},'Observation replaces exorcism, mostly.');
   def(2,'sci','literature','Literature',{mod:{influence:0.10}},'Epics carry your name past every border.');
   def(2,'sci','engineering','Engineering',{mod:{buildCost:-0.05}},'Cranes, levers and arrogance.');
-  def(2,'civ','cityStates','City States',{mod:{claimCost:-0.10}},'The city becomes an idea worth dying for.');
+  def(2,'civ','cityStates','City States',{mod:{claimCost:-0.10,cityTiles:1}},'The city becomes an idea worth dying for. +1 city tile.');
   def(2,'civ','monarchy','Monarchy',{mod:{influence:0.10,maxPolicies:1}},'One crown to answer every question.');
   def(2,'civ','stateReligion','State Religion',{unlockB:['temple']},'The gods take a side — yours.');
   def(2,'civ','citizenship','Citizenship',{mod:{popGrowth:0.10}},'Belonging becomes a legal status worth having.');
@@ -148,10 +148,10 @@
   def(3,'mil','feudalLevies','Feudal Levies',{unlockU:['pikeman'],mod:{unitUpkeep:-0.10}},'Land for service — an army you don\'t pay in coin.');
   def(3,'mil','chivalry','Chivalry',{unlockU:['knight']},'Armored aristocracy on horseback.');
   def(3,'mil','crossbows','Crossbows',{unlockU:['crossbowman']},'A week of training defeats a lifetime of armor.');
-  def(3,'mil','castles','Castles',{unlockB:['castle']},'A stone answer to every question of ownership.');
+  def(3,'mil','castles','Castles',{unlockB:['castle'],mod:{cityTiles:1}},'A stone answer to every question of ownership. +1 city tile.');
   def(3,'mil','siegeEngines','Siege Engines',{unlockU:['trebuchet']},'Counterweights hurl the sky at walls.');
   def(3,'mil','warCogs','War Cogs',{unlockU:['cog']},'High-sided merchantmen turned floating forts.');
-  def(3,'com','guilds','Guilds',{unlockB:['guildHall']},'Monopoly, quality control and mutual aid in one charter.');
+  def(3,'com','guilds','Guilds',{unlockB:['guildHall'],mod:{cityTiles:1}},'Monopoly, quality control and mutual aid in one charter. +1 city tile.');
   def(3,'com','letterOfCredit','Letters of Credit',{mod:{gold:0.10}},'Paper promises move fortunes past bandits.');
   def(3,'com','fairs','Trade Fairs',{mod:{tradeCap:1,gold:0.05}},'A season of commerce in a fortnight.');
   def(3,'com','silkRoad','Silk Road',{unlockB:['tradePost']},'The desert becomes a highway of silk and spice.');
@@ -178,7 +178,7 @@
   def(4,'agri','botany','Botany',{mod:{food:0.05,science:0.05}},'Plants catalogued, crossed and conquered.');
   def(4,'agri','cashCrops','Cash Crops',{mod:{'b:plantation':0.25}},'Sugar, tobacco, cotton — sweet, addictive profit.');
   def(4,'craft','printingPress','Printing Press',{unlockB:['printworks']},'Arguments at industrial volume.');
-  def(4,'craft','manufactories','Manufactories',{unlockB:['manufactory']},'Many hands under one roof, one process.');
+  def(4,'craft','manufactories','Manufactories',{unlockB:['manufactory'],mod:{cityTiles:1}},'Many hands under one roof, one process. +1 city tile.');
   def(4,'craft','advancedMetallurgy','Advanced Metallurgy',{mod:{materials:0.10}},'Blast furnaces and boring machines.');
   def(4,'craft','shipframes','Ship Framing',{unlockB:['shipyard']},'Skeleton-first construction launches leviathans.');
   def(4,'craft','instrumentMaking','Instrument Making',{mod:{science:0.10}},'Precision tools for precision thoughts.');
@@ -206,7 +206,7 @@
   def(4,'civ','absolutism','Absolutism',{mod:{maxPolicies:1}},'L\'état, c\'est moi.');
   def(4,'civ','humanism','Humanism',{mod:{science:0.05,popGrowth:0.05}},'Man becomes the measure.');
   def(4,'civ','tolerance','Religious Tolerance',{mod:{influence:0.10}},'Heretics pay taxes too.');
-  def(4,'civ','civilService','Civil Service',{mod:{claimCost:-0.10,borderUpkeep:-0.10}},'Exams, files and a state that remembers.');
+  def(4,'civ','civilService','Civil Service',{mod:{claimCost:-0.10,borderUpkeep:-0.10,cityTiles:1}},'Exams, files and a state that remembers. +1 city tile.');
 
   /* ================= AGE 5 — INDUSTRIAL ================= */
   def(5,'agri','seedDrills','Seed Drills',{mod:{'b:farm':0.25}},'Rows, not scatter. Yields jump.');
@@ -218,7 +218,7 @@
   def(5,'craft','steamPower','Steam Power',{unlockB:['coalMine']},'Boiling water moves the world. Reveals Coal.');
   def(5,'craft','factories','Factory System',{unlockB:['factory']},'Steam-driven mass production. Consumes Coal.');
   def(5,'craft','steelmaking','Steelmaking',{unlockB:['steelworks'],mod:{materials:0.10}},'Bessemer\'s converter makes steel cheap as iron.');
-  def(5,'craft','railways','Railways',{unlockB:['railDepot'],mod:{moveSpeed:0.25}},'The countryside shrinks to a timetable.');
+  def(5,'craft','railways','Railways',{unlockB:['railDepot'],mod:{moveSpeed:0.25,cityTiles:1}},'The countryside shrinks to a timetable. +1 city tile.');
   def(5,'craft','machineTools','Machine Tools',{mod:{buildCost:-0.10}},'Machines that make machines.');
   def(5,'craft','telegraphy','Telegraphy',{unlockB:['telegraphOffice']},'News outruns the horse at last.');
   def(5,'mil','rifling','Rifling',{unlockU:['rifleman']},'Spin stabilization makes every soldier a marksman.');
@@ -238,7 +238,7 @@
   def(5,'sci','electricity','Electricity',{mod:{science:0.15}},'Lightning in a copper leash.');
   def(5,'sci','thermodynamics','Thermodynamics',{mod:{science:0.10}},'You can\'t win, you can\'t break even.');
   def(5,'sci','naturalHistory','Natural History',{mod:{science:0.10}},'Deep time and descent with modification.');
-  def(5,'sci','sanitation','Sanitation',{unlockB:['sewers'],mod:{popGrowth:0.10}},'Cities stop poisoning themselves.');
+  def(5,'sci','sanitation','Sanitation',{unlockB:['sewers'],mod:{popGrowth:0.10,cityTiles:1}},'Cities stop poisoning themselves. +1 city tile.');
   def(5,'civ','nationalism','Nationalism',{mod:{influence:0.15,warWeariness:-0.10}},'The tribe, industrialized.');
   def(5,'civ','laborMovements','Labor Movements',{mod:{materials:0.10}},'Eight hours\' work deserves eight hours\' rest.');
   def(5,'civ','constitution','Constitutionalism',{mod:{maxPolicies:1}},'The rules above the rulers.');
@@ -257,7 +257,7 @@
   def(6,'craft','assemblyLines','Assembly Lines',{mod:{materials:0.15,unitCost:-0.10}},'The product moves; the worker doesn\'t.');
   def(6,'craft','plastics','Plastics',{mod:{materials:0.10}},'Any shape, any color, forever.');
   def(6,'craft','oilRefining','Oil Refining',{unlockB:['refinery']},'Crude cracked into fuel, tar and money.');
-  def(6,'craft','electricGrid','Electric Grid',{unlockB:['powerPlant']},'Power on tap in every district. Consumes Coal.');
+  def(6,'craft','electricGrid','Electric Grid',{unlockB:['powerPlant'],mod:{cityTiles:1}},'Power on tap in every district. Consumes Coal. +1 city tile.');
   def(6,'craft','offshoreDrilling','Offshore Drilling',{unlockB:['offshorePlatform']},'Chasing oil beneath the waves.');
   def(6,'mil','modernInfantry','Modern Infantry',{unlockU:['infantry']},'Squad weapons, radios and doctrine.');
   def(6,'mil','armoredWarfare','Armored Warfare',{unlockU:['tank']},'Cavalry reborn in welded steel. Consumes Oil.');
@@ -276,7 +276,7 @@
   def(6,'sci','antibiotics','Antibiotics',{mod:{healRate:0.50,popGrowth:0.10}},'Infection loses its death sentence.');
   def(6,'sci','industrialResearch','Industrial R&D',{unlockB:['researchLab']},'Invention becomes a department.');
   def(6,'sci','rocketry','Rocketry',{mod:{science:0.10}},'Pointed at the sky, for now.');
-  def(6,'sci','publicHealth','Public Health',{unlockB:['waterTreatment'],mod:{popGrowth:0.10}},'Clean water saves more lives than any drug.');
+  def(6,'sci','publicHealth','Public Health',{unlockB:['waterTreatment'],mod:{popGrowth:0.10,cityTiles:1}},'Clean water saves more lives than any drug. +1 city tile.');
   def(6,'civ','suffrage','Universal Suffrage',{mod:{influence:0.10,maxPolicies:1}},'Everyone gets a lever.');
   def(6,'civ','propaganda','Propaganda',{mod:{warWeariness:-0.20}},'Morale, manufactured.');
   def(6,'civ','welfareState','Welfare State',{mod:{popGrowth:0.10}},'The state catches those who fall.');
@@ -309,7 +309,7 @@
   def(7,'com','ventureCapital','Venture Capital',{mod:{science:0.10,gold:0.05}},'Betting big on clever people.');
   def(7,'com','commercialAviation','Commercial Aviation',{unlockB:['airport'],mod:{tradeCap:1}},'Anywhere on Earth by dinnertime.');
   def(7,'com','serviceEconomy','Service Economy',{mod:{gold:0.10}},'Wealth from work you can\'t drop on your foot.');
-  def(7,'sci','computers','Computers',{unlockB:['dataCenter'],mod:{science:0.15,researchOptions:1}},'Arithmetic at the speed of light. +1 research option to choose from.');
+  def(7,'sci','computers','Computers',{unlockB:['dataCenter'],mod:{science:0.15,researchOptions:1,cityTiles:1}},'Arithmetic at the speed of light. +1 research option to choose from. +1 city tile.');
   def(7,'sci','internet','The Internet',{unlockB:['mediaNetwork'],mod:{science:0.15,influence:0.10}},'Everyone talks to everyone, about everything.');
   def(7,'sci','satellites','Satellites',{mod:{vision:2},flag:['revealMap']},'The whole globe on one screen. Reveals the world map.');
   def(7,'sci','polarScience','Polar Science',{unlockB:['polarResearchStation'],flag:['iceTravel']},'Icebreakers open the last frontier. Units may cross Ice Caps.');
@@ -318,7 +318,7 @@
   def(7,'civ','massMedia','Mass Media',{mod:{influence:0.15}},'The narrative becomes the territory.');
   def(7,'civ','internationalLaw','International Law',{mod:{influence:0.10,claimCost:-0.10}},'Treaties with teeth, occasionally.');
   def(7,'civ','environmentalism','Environmentalism',{mod:{food:0.05,eventLuck:0.05}},'The planet gets a seat at the table.');
-  def(7,'civ','digitalGovernance','Digital Governance',{mod:{maxPolicies:1}},'Bureaucracy at broadband speed.');
+  def(7,'civ','digitalGovernance','Digital Governance',{mod:{maxPolicies:1,cityTiles:1}},'Bureaucracy at broadband speed. +1 city tile.');
   def(7,'civ','softPower','Soft Power',{mod:{influence:0.15}},'Culture conquers where armies can\'t.');
   def(7,'civ','openSociety','Open Society',{mod:{science:0.10,influence:0.05}},'Freedom turns out to be productive.');
 
@@ -356,7 +356,7 @@
   def(8,'civ','globalGovernance','Global Governance',{mod:{influence:0.20,maxPolicies:1}},'Humanity\'s HOA.');
   def(8,'civ','digitalDemocracy','Digital Democracy',{mod:{influence:0.15}},'The agora, redistributed.');
   def(8,'civ','universalBasicIncome','Universal Basic Income',{mod:{popGrowth:0.10,influence:0.10}},'A floor under every citizen.');
-  def(8,'civ','arcologies','Arcologies',{unlockB:['arcology']},'A city in a single building.');
+  def(8,'civ','arcologies','Arcologies',{unlockB:['arcology'],mod:{cityTiles:2}},'A city in a single building. +2 city tiles.');
   def(8,'civ','planetaryUnion','Planetary Union',{mod:{claimCost:-0.20,borderUpkeep:-0.20}},'Borders begin to feel old-fashioned.');
   def(8,'civ','ascensionProgram','Ascension Program',{flag:['scienceVictory']},'Begin the Starlight Ark project — the path to Science Victory.');
 

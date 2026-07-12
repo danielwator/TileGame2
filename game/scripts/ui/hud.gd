@@ -10,6 +10,7 @@ var game
 
 var selected_unit_id := -1
 var _sel_slot := -1
+var _last_tick_seen := -1
 
 var _res_labels := {}
 var _research_btn: Button
@@ -217,11 +218,16 @@ func tick_update(delta: float) -> void:
 		_research_btn.text = "Sci: (+%.1f banked)" % income.get("science", 0.0)
 	var age_def: Dictionary = Data.age_by_id[nat.age]
 	_age_label.text = "%s  •  Year %d" % [age_def.short, int(game.year)]
-	# refresh open panels
-	if _tile_panel.visible:
-		_refresh_tile_panel()
-	if _city_panel.visible:
-		_refresh_city_panel()
+	# Refresh open panels only when the simulation actually ticked, and never
+	# while the mouse is over them — rebuilding buttons under the cursor was
+	# eating clicks ("have to click multiple times").
+	if game.tick_count != _last_tick_seen:
+		_last_tick_seen = game.tick_count
+		var mp := get_viewport().get_mouse_position()
+		if _tile_panel.visible and not _tile_panel.get_global_rect().has_point(mp):
+			_refresh_tile_panel()
+		if _city_panel.visible and not _city_panel.get_global_rect().has_point(mp):
+			_refresh_city_panel()
 
 
 # ================= toasts =================
@@ -273,9 +279,15 @@ func on_hover_tile(t: int) -> void:
 	var txt: String = bio.name
 	var o: int = game.owner[t]
 	if o >= 0 and game.fog_state(game.human_id, t) >= 1:
-		txt += "  •  " + game.nations[o].display_name
+		var cid: int = game.city_tile_of[t]
+		if cid >= 0:
+			txt += "  •  %s district" % game.cities[cid].cname
+		else:
+			txt += "  •  " + game.nations[o].display_name
 	if game.deposit_visible(game.human_id, t):
 		txt += "  •  " + Data.deposits[game.deposit[t]].name
+	if o == game.human_id and game.fog_state(game.human_id, t) == 2 and game.tile_prod.has(t):
+		txt += "  •  " + _prod_text(game.tile_prod[t])
 	_hover_label.text = txt
 
 
@@ -373,7 +385,12 @@ func _refresh_tile_panel() -> void:
 	title_row.add_child(tl)
 	var o: int = game.owner[t]
 	if o >= 0:
-		_lbl(_tile_box, "Territory of %s" % game.nations[o].display_name, game.nations[o].color)
+		var cid: int = game.city_tile_of[t]
+		if cid >= 0:
+			_lbl(_tile_box, "District of %s  (%s)" % [game.cities[cid].cname, game.nations[o].display_name],
+				game.nations[o].color.lerp(Color(1, 1, 1), 0.35))
+		else:
+			_lbl(_tile_box, "Territory of %s" % game.nations[o].display_name, game.nations[o].color)
 	# yields
 	var ytxt := ""
 	for k: String in bio.yields:
@@ -390,9 +407,29 @@ func _refresh_tile_panel() -> void:
 		_lbl(_tile_box, "(Intel only — tile is not currently visible)", COL_DIM, 11)
 		return
 
-	# district slots (grid of chips; click a slot to build/inspect)
-	if game.tile_city[t] >= 0 and game.owner[t] >= 0:
+	# what this tile is producing right now
+	if game.owner[t] >= 0 and game.tile_prod.has(t):
+		_lbl(_tile_box, "Producing: " + _prod_text(game.tile_prod[t]), COL_GOOD, 12)
+	elif game.owner[t] >= 0:
+		_lbl(_tile_box, "Producing: nothing", COL_DIM, 12)
+
+	# district slots (grid of chips) exist only on CITY tiles
+	if game.is_city_tile(t):
 		_slot_grid(t)
+	elif game.owner[t] == game.human_id:
+		# territory: small trickle, offer annexation
+		var why_ax: String = game.can_annex(game.human_id, t)
+		var target = game.annex_target(game.human_id, t)
+		if why_ax == "" and target != null:
+			var cost: Dictionary = game.annex_cost(target)
+			_btn(_tile_box, "Annex into %s  (%d Mat, %d Gold, %d Inf)" % [target.cname,
+				int(cost.materials), int(cost.gold), int(cost.influence)],
+				func() -> void:
+					game.annex_tile(game.human_id, t)
+					_refresh_tile_panel(), true,
+				"City tiles can hold buildings; territory only trickles resources.")
+		else:
+			_lbl(_tile_box, "Territory — trickles a small share of its biome yields. " + why_ax, COL_DIM, 11)
 
 	# units on tile
 	var here: Array = game.units_on(t)
@@ -434,6 +471,17 @@ func _refresh_tile_panel() -> void:
 	# per-slot build menu / building info
 	if o == game.human_id and game.tile_city[t] >= 0 and _sel_slot >= 0:
 		_slot_details(t, _sel_slot)
+
+
+func _prod_text(prod: Dictionary) -> String:
+	var parts: Array = []
+	for k: String in RES_ORDER:
+		if prod.has(k) and prod[k] >= 0.05:
+			parts.append("+%.1f %s" % [prod[k], RES_SHORT.get(k, k)])
+	for k2: String in prod:
+		if k2 == "science" and prod[k2] >= 0.05:
+			parts.append("+%.1f Sci" % prod[k2])
+	return " · ".join(parts) if not parts.is_empty() else "nothing"
 
 
 ## short composition line, e.g. "5× Forest · 2× Coast · 1× Desert"
@@ -624,6 +672,10 @@ func _refresh_city_panel() -> void:
 	_lbl(_city_box, "Population %d / %d    Growth %d%%" % [c.pop, game.city_max_pop(c),
 		int(clampf(c.growth / (12.0 + 8.0 * c.pop), 0, 1) * 100.0)])
 	_lbl(_city_box, "Defense %d    HP %d" % [int(game.city_defense(c)), int(c.hp)])
+	var cap: int = game.city_tile_cap(c.nation_id)
+	_lbl(_city_box, "City tiles: %d / %d%s" % [c.tiles.size(), cap,
+		"  (research urban techs to expand)" if c.tiles.size() >= cap else "  (annex adjacent territory to grow)"],
+		COL_ACCENT2, 12)
 	if c.nation_id != game.human_id:
 		return
 	# specialization
@@ -832,7 +884,7 @@ func _fx_text(t: Dictionary) -> String:
 	if t.mod != null:
 		for k: String in t.mod:
 			var v: float = t.mod[k]
-			if k in ["vision", "maxPolicies", "tradeCap", "researchOptions"]:
+			if k in ["vision", "maxPolicies", "tradeCap", "researchOptions", "cityTiles"]:
 				parts.append("+%d %s" % [int(v), k])
 			else:
 				parts.append("%s%d%% %s" % ["+" if v > 0 else "", int(v * 100), k])

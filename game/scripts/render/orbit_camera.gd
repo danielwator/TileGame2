@@ -21,7 +21,8 @@ var max_dist := R * 4.4
 var _v_theta := 0.0
 var _v_phi := 0.0
 var _dragging := false
-var _moved := 0.0
+var _press_pos := Vector2.ZERO
+var _moved := 0.0     # max distance from the press point (not accumulated jitter)
 
 
 func _ready() -> void:
@@ -51,15 +52,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif e.button_index == MOUSE_BUTTON_LEFT or e.button_index == MOUSE_BUTTON_RIGHT or e.button_index == MOUSE_BUTTON_MIDDLE:
 			if e.pressed:
 				_dragging = true
+				_press_pos = e.position
 				_moved = 0.0
 			else:
-				if _dragging and _moved < 6.0:
+				# click = released within 10 px of where the press started;
+				# small hand jitter no longer turns clicks into drags
+				if _dragging and _moved < 10.0:
 					tile_clicked.emit(e.position, e.button_index)
 				_dragging = false
 	elif event is InputEventMouseMotion and _dragging:
 		var e2 := event as InputEventMouseMotion
-		_moved += absf(e2.relative.x) + absf(e2.relative.y)
-		if _moved >= 6.0:
+		_moved = maxf(_moved, (e2.position - _press_pos).length())
+		if _moved >= 10.0:
 			# grab convention: the surface follows the cursor on both axes
 			var s := _rot_speed()
 			theta += e2.relative.x * s

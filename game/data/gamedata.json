@@ -772,14 +772,15 @@
     "irrigation"
    ],
    "mod": {
-    "food": 0.05
+    "food": 0.05,
+    "cityTiles": 1
    },
    "flag": null,
    "unlockB": [
     "granary"
    ],
    "unlockU": null,
-   "desc": "Sealed jars defeat rot and rats."
+   "desc": "Sealed jars defeat rot and rats. +1 city tile."
   },
   {
    "id": "toolmaking",
@@ -822,13 +823,15 @@
    "pre": [
     "woodworking"
    ],
-   "mod": null,
+   "mod": {
+    "cityTiles": 1
+   },
    "flag": null,
    "unlockB": [
     "quarry"
    ],
    "unlockU": null,
-   "desc": "Dressed stone outlives its maker."
+   "desc": "Dressed stone outlives its maker. +1 city tile."
   },
   {
    "id": "wheel",
@@ -1146,12 +1149,13 @@
     "herbalism"
    ],
    "mod": {
-    "science": 0.1
+    "science": 0.1,
+    "researchOptions": 1
    },
    "flag": null,
    "unlockB": null,
    "unlockU": null,
-   "desc": "Memory outsourced to clay. Everything changes."
+   "desc": "Memory outsourced to clay. Everything changes. +1 research option to choose from."
   },
   {
    "id": "sailing",
@@ -1315,13 +1319,15 @@
    "pre": [
     "fallowing"
    ],
-   "mod": null,
+   "mod": {
+    "cityTiles": 1
+   },
    "flag": null,
    "unlockB": [
     "aqueduct"
    ],
    "unlockU": null,
-   "desc": "Cities drink from mountains a valley away."
+   "desc": "Cities drink from mountains a valley away. +1 city tile."
   },
   {
    "id": "viticulture",
@@ -1818,12 +1824,13 @@
     "warriorCode"
    ],
    "mod": {
-    "claimCost": -0.1
+    "claimCost": -0.1,
+    "cityTiles": 1
    },
    "flag": null,
    "unlockB": null,
    "unlockU": null,
-   "desc": "The city becomes an idea worth dying for."
+   "desc": "The city becomes an idea worth dying for. +1 city tile."
   },
   {
    "id": "monarchy",
@@ -2178,13 +2185,15 @@
    "pre": [
     "crossbows"
    ],
-   "mod": null,
+   "mod": {
+    "cityTiles": 1
+   },
    "flag": null,
    "unlockB": [
     "castle"
    ],
    "unlockU": null,
-   "desc": "A stone answer to every question of ownership."
+   "desc": "A stone answer to every question of ownership. +1 city tile."
   },
   {
    "id": "siegeEngines",
@@ -2229,13 +2238,15 @@
    "pre": [
     "luxuryTrade"
    ],
-   "mod": null,
+   "mod": {
+    "cityTiles": 1
+   },
    "flag": null,
    "unlockB": [
     "guildHall"
    ],
    "unlockU": null,
-   "desc": "Monopoly, quality control and mutual aid in one charter."
+   "desc": "Monopoly, quality control and mutual aid in one charter. +1 city tile."
   },
   {
    "id": "letterOfCredit",
@@ -2658,13 +2669,15 @@
    "pre": [
     "printingPress"
    ],
-   "mod": null,
+   "mod": {
+    "cityTiles": 1
+   },
    "flag": null,
    "unlockB": [
     "manufactory"
    ],
    "unlockU": null,
-   "desc": "Many hands under one roof, one process."
+   "desc": "Many hands under one roof, one process. +1 city tile."
   },
   {
    "id": "advancedMetallurgy",
@@ -2951,12 +2964,13 @@
     "papermaking"
    ],
    "mod": {
-    "science": 0.15
+    "science": 0.15,
+    "researchOptions": 1
    },
    "flag": null,
    "unlockB": null,
    "unlockU": null,
-   "desc": "Test it or toss it."
+   "desc": "Test it or toss it. +1 research option to choose from."
   },
   {
    "id": "heliocentrism",
@@ -3145,12 +3159,13 @@
    ],
    "mod": {
     "claimCost": -0.1,
-    "borderUpkeep": -0.1
+    "borderUpkeep": -0.1,
+    "cityTiles": 1
    },
    "flag": null,
    "unlockB": null,
    "unlockU": null,
-   "desc": "Exams, files and a state that remembers."
+   "desc": "Exams, files and a state that remembers. +1 city tile."
   },
   {
    "id": "seedDrills",
@@ -3317,14 +3332,15 @@
     "steelmaking"
    ],
    "mod": {
-    "moveSpeed": 0.25
+    "moveSpeed": 0.25,
+    "cityTiles": 1
    },
    "flag": null,
    "unlockB": [
     "railDepot"
    ],
    "unlockU": null,
-   "desc": "The countryside shrinks to a timetable."
+   "desc": "The countryside shrinks to a timetable. +1 city tile."
   },
   {
    "id": "machineTools",
@@ -3664,14 +3680,15 @@
     "naturalHistory"
    ],
    "mod": {
-    "popGrowth": 0.1
+    "popGrowth": 0.1,
+    "cityTiles": 1
    },
    "flag": null,
    "unlockB": [
     "sewers"
    ],
    "unlockU": null,
-   "desc": "Cities stop poisoning themselves."
+   "desc": "Cities stop poisoning themselves. +1 city tile."
   },
   {
    "id": "nationalism",
@@ -3958,13 +3975,15 @@
    "pre": [
     "oilRefining"
    ],
-   "mod": null,
+   "mod": {
+    "cityTiles": 1
+   },
    "flag": null,
    "unlockB": [
     "powerPlant"
    ],
    "unlockU": null,
-   "desc": "Power on tap in every district. Consumes Coal."
+   "desc": "Power on tap in every district. Consumes Coal. +1 city tile."
   },
   {
    "id": "offshoreDrilling",
@@ -4289,14 +4308,15 @@
     "rocketry"
    ],
    "mod": {
-    "popGrowth": 0.1
+    "popGrowth": 0.1,
+    "cityTiles": 1
    },
    "flag": null,
    "unlockB": [
     "waterTreatment"
    ],
    "unlockU": null,
-   "desc": "Clean water saves more lives than any drug."
+   "desc": "Clean water saves more lives than any drug. +1 city tile."
   },
   {
    "id": "suffrage",
@@ -4827,14 +4847,16 @@
     "publicHealth"
    ],
    "mod": {
-    "science": 0.15
+    "science": 0.15,
+    "researchOptions": 1,
+    "cityTiles": 1
    },
    "flag": null,
    "unlockB": [
     "dataCenter"
    ],
    "unlockU": null,
-   "desc": "Arithmetic at the speed of light."
+   "desc": "Arithmetic at the speed of light. +1 research option to choose from. +1 city tile."
   },
   {
    "id": "internet",
@@ -4992,12 +5014,13 @@
     "environmentalism"
    ],
    "mod": {
-    "maxPolicies": 1
+    "maxPolicies": 1,
+    "cityTiles": 1
    },
    "flag": null,
    "unlockB": null,
    "unlockU": null,
-   "desc": "Bureaucracy at broadband speed."
+   "desc": "Bureaucracy at broadband speed. +1 city tile."
   },
   {
    "id": "softPower",
@@ -5616,13 +5639,15 @@
    "pre": [
     "universalBasicIncome"
    ],
-   "mod": null,
+   "mod": {
+    "cityTiles": 2
+   },
    "flag": null,
    "unlockB": [
     "arcology"
    ],
    "unlockU": null,
-   "desc": "A city in a single building."
+   "desc": "A city in a single building. +2 city tiles."
   },
   {
    "id": "planetaryUnion",
@@ -10330,6 +10355,20 @@
   }
  },
  "changelog": [
+  {
+   "version": "0.7.0",
+   "date": "2026-07-12",
+   "title": "Cities vs. territory, annexation, per-tile production",
+   "changes": [
+    "Buildings can now only be built on tiles that are PART of a city. A new city is just its center tile; adjacent owned territory must be ANNEXED into the city (costs Materials + Gold + Influence scaling with city size) before it can be developed.",
+    "City size is research-gated: 15 urban technologies across the ages (Masonry, Pottery, Aqueducts, City States, Guilds, Castles, Civil Service, Manufactories, Sanitation, Railways, Electric Grid, Public Health, Computers, Digital Governance, Arcologies) each grant +1 city tile (+2 for Arcologies), growing the per-city cap from 1 to ~17.",
+    "Plain territory only trickles a small share of its biome yields; claiming it costs sharply more Influence the farther it lies from your cities (distance factor raised ~40%). Territory decays first when Influence runs dry — city tiles are protected.",
+    "Cities are now visually distinct from territory: bright inner rings around each city's tile group, whitened urban tint on city tiles (strongest on the center), faint wash on territory. Captured cities transfer all their district tiles.",
+    "Every owned tile now reports what it actually produced last tick — in the tile panel (\"Producing: +2.4 Food · +1.0 Mat\") and in the hover readout.",
+    "UI click reliability: panels no longer rebuild under the cursor (this was eating clicks), and click-vs-drag detection measures distance from the press point instead of accumulated jitter (10 px threshold).",
+    "AI annexes high-value tiles into its cities and builds only on city tiles; save format bumped to v3 (city tile lists)."
+   ]
+  },
   {
    "version": "0.6.0",
    "date": "2026-07-12",

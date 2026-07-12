@@ -5,6 +5,20 @@
 'use strict';
 window.CHANGELOG = [
   {
+    version: '0.7.0',
+    date: '2026-07-12',
+    title: 'Cities vs. territory, annexation, per-tile production',
+    changes: [
+      'Buildings can now only be built on tiles that are PART of a city. A new city is just its center tile; adjacent owned territory must be ANNEXED into the city (costs Materials + Gold + Influence scaling with city size) before it can be developed.',
+      'City size is research-gated: 15 urban technologies across the ages (Masonry, Pottery, Aqueducts, City States, Guilds, Castles, Civil Service, Manufactories, Sanitation, Railways, Electric Grid, Public Health, Computers, Digital Governance, Arcologies) each grant +1 city tile (+2 for Arcologies), growing the per-city cap from 1 to ~17.',
+      'Plain territory only trickles a small share of its biome yields; claiming it costs sharply more Influence the farther it lies from your cities (distance factor raised ~40%). Territory decays first when Influence runs dry — city tiles are protected.',
+      'Cities are now visually distinct from territory: bright inner rings around each city\'s tile group, whitened urban tint on city tiles (strongest on the center), faint wash on territory. Captured cities transfer all their district tiles.',
+      'Every owned tile now reports what it actually produced last tick — in the tile panel ("Producing: +2.4 Food · +1.0 Mat") and in the hover readout.',
+      'UI click reliability: panels no longer rebuild under the cursor (this was eating clicks), and click-vs-drag detection measures distance from the press point instead of accumulated jitter (10 px threshold).',
+      'AI annexes high-value tiles into its cities and builds only on city tiles; save format bumped to v3 (city tile lists).',
+    ],
+  },
+  {
     version: '0.6.0',
     date: '2026-07-12',
     title: 'TileGame2: slower pace, uniform eras',

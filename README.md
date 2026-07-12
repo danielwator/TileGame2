@@ -56,11 +56,15 @@ branches your empire is spec'd into (research history, policies, perks, city
 specializations); reroll for Influence. **Icons**: the UI renders placeholder boxes —
 drop PNGs into `game/assets/icons/` (see its README) to replace them.
 
-**Districts**: each tile carries **8 building slots** apportioned from the biome mix it
-spans (70% forest / 20% ocean / 10% desert → 5 forest + 2 ocean + 1 desert slots). Slots
-gate which buildings are allowed and apply their own biome multipliers, so one tile can
-run a lumber camp, fishery and farm side by side — city population limits how many
-buildings actually operate.
+**Cities & districts**: only tiles that are *part of a city* can hold buildings. A city
+starts as its center tile and grows by **annexing** adjacent owned territory (Materials +
+Gold + Influence, scaling with city size), capped by urban research (+1 city tile from
+techs like Masonry, Aqueducts, Guilds… up to ~17 by the Near Future). Each city tile
+carries **8 building slots** apportioned from the biome mix it spans (70% forest / 20%
+ocean / 10% desert → 5 forest + 2 ocean + 1 desert slots); slots gate which buildings
+are allowed and apply their own biome multipliers. Plain territory just trickles a small
+share of its biome yields and costs steeply more Influence to claim the farther it lies
+from your cities.
 
 **World generation** (fully seeded and deterministic): tectonic plates with motion
 vectors → boundary stress (mountain belts, island arcs, rifts, trenches, hotspot

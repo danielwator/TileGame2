@@ -14,7 +14,7 @@ signal perk_offer(nation_id: int)
 signal research_offer(nation_id: int)
 signal victory(nation_id: int, victory_id: String)
 
-const SAVE_VERSION := 2
+const SAVE_VERSION := 3
 # real-time pace: one simulation tick every 2.4 s at 1x speed
 const TICK_SECONDS := 2.4
 # uniform abstract calendar: every tick advances the same number of years
@@ -131,6 +131,9 @@ class City:
 	var hp := 100.0
 	var training := {}        # {unit: id, ticks: n}
 	var is_original_capital := false
+	# tiles that are PART of the city (buildable); grows via annexation,
+	# capped by cityTiles research. Everything else you own is territory.
+	var tiles: Array = []
 
 	func spec_mod(key: String) -> float:
 		if spec == "":
@@ -161,7 +164,9 @@ var rng: RandomNumberGenerator
 var nations: Array = []
 var human_id := 0
 var owner: PackedInt32Array
-var tile_city: PackedInt32Array     # tile -> city id (-1)
+var tile_city: PackedInt32Array     # tile -> nearest city id for territory (-1)
+var city_tile_of: PackedInt32Array  # tile -> city id if the tile is PART of that city (-1)
+var tile_prod := {}                 # tile -> {res: amount} produced last tick (UI)
 # per tile: null | Array[SLOTS] of (null | {id, city, progress, time, done}).
 # Slot k's allowed buildings depend on slot k's biome (world.t_slots) — a tile
 # spanning several biomes offers a mix of slot types (Stellaris-style districts)
@@ -202,6 +207,7 @@ func setup() -> void:
 	var nt: int = world.NT
 	owner = PackedInt32Array(); owner.resize(nt); owner.fill(-1)
 	tile_city = PackedInt32Array(); tile_city.resize(nt); tile_city.fill(-1)
+	city_tile_of = PackedInt32Array(); city_tile_of.resize(nt); city_tile_of.fill(-1)
 	buildings.resize(nt)
 	deposit = world.t_deposit.duplicate()
 
@@ -444,8 +450,16 @@ func overlay_color(ti: int) -> Color:
 	var o2 := owner[ti]
 	if o2 >= 0:
 		var c2: Color = nations[o2].color
-		var a := 0.30 if city_at(ti) != null else 0.15
-		return Color(c2.r, c2.g, c2.b, a)
+		if city_at(ti) != null:
+			# city center: bright, whitened urban core
+			var cc := c2.lerp(Color(1, 1, 1), 0.45)
+			return Color(cc.r, cc.g, cc.b, 0.42)
+		if city_tile_of[ti] >= 0:
+			# city district tiles: clearly urban
+			var cd := c2.lerp(Color(1, 1, 1), 0.25)
+			return Color(cd.r, cd.g, cd.b, 0.32)
+		# plain territory: faint wash
+		return Color(c2.r, c2.g, c2.b, 0.10)
 	return Color(0, 0, 0, 0)
 
 
@@ -479,6 +493,8 @@ func found_city(n: int, tile: int, free := false):
 		nations[n].capital_tile = tile
 	owner[tile] = n
 	tile_city[tile] = c.id
+	c.tiles = [tile]
+	city_tile_of[tile] = c.id
 	# the city center occupies the tile's best settleable slot
 	var arr := _ensure_slots(tile)
 	var center_slot := 0
@@ -531,7 +547,8 @@ func effective_dist(n: int, tile: int) -> int:
 func claim_cost(n: int, tile: int) -> float:
 	var b: Dictionary = Data.biomes[world.t_biome[tile]]
 	var d := effective_dist(n, tile)
-	return CLAIM_BASE * float(b.infMul) * (1.0 + 0.35 * (d - 1)) * maxf(0.2, 1.0 + nations[n].modv("claimCost"))
+	# territory gets sharply more expensive the farther it lies from your cities
+	return CLAIM_BASE * float(b.infMul) * (1.0 + 0.5 * (d - 1)) * maxf(0.2, 1.0 + nations[n].modv("claimCost"))
 
 
 func can_claim(n: int, tile: int) -> String:
@@ -595,11 +612,12 @@ func border_upkeep(n: int) -> float:
 
 
 func _decay_border(n: int) -> void:
-	# influence bankruptcy: the farthest tile reverts to neutral
+	# influence bankruptcy: the farthest TERRITORY tile reverts to neutral
+	# (tiles that are part of a city are protected)
 	var worst := -1
 	var worst_d := -1
 	for i in range(world.NT):
-		if owner[i] != n or city_at(i) != null:
+		if owner[i] != n or city_at(i) != null or city_tile_of[i] >= 0:
 			continue
 		var d := effective_dist(n, i)
 		if d > worst_d:
@@ -616,6 +634,88 @@ func _decay_border(n: int) -> void:
 		notify(n, "Border tile lost — influence upkeep unpaid!", "warn")
 
 
+# ---------------- city expansion (annexation) ----------------
+#
+# Only tiles that are PART of a city can hold buildings. Growing a city
+# means annexing adjacent owned territory into it — costing Materials,
+# Gold and Influence (scaling with city size) and capped by research
+# (the cityTiles modifier from techs like Masonry, Aqueducts, Guilds...).
+
+func city_tile_cap(n: int) -> int:
+	return 1 + nations[n].mod_int("cityTiles")
+
+
+func is_city_tile(t: int) -> bool:
+	return city_tile_of[t] >= 0
+
+
+## cost of the NEXT annexation for this city
+func annex_cost(c) -> Dictionary:
+	var k: int = c.tiles.size()   # 1 = just the center
+	return {
+		"materials": 40.0 + 30.0 * (k - 1),
+		"gold": 20.0 + 15.0 * (k - 1),
+		"influence": 15.0 + 10.0 * (k - 1),
+	}
+
+
+## "" if `tile` can be annexed into nation n's adjacent city, else the reason
+func can_annex(n: int, tile: int) -> String:
+	if owner[tile] != n:
+		return "Not your territory."
+	if city_tile_of[tile] >= 0:
+		return "Already part of a city."
+	if world.t_land[tile] == 0:
+		return "Cities cannot annex open water."
+	# must touch one of this nation's city tiles
+	var tiles: Dictionary = world.tiles
+	var c = null
+	for e in range(tiles.nbr_off[tile], tiles.nbr_off[tile + 1]):
+		var nb: int = tiles.nbr[e]
+		var cid := city_tile_of[nb]
+		if cid >= 0 and cities[cid].nation_id == n:
+			c = cities[cid]
+			break
+	if c == null:
+		return "Must border one of your city's tiles."
+	if c.tiles.size() >= city_tile_cap(n):
+		return "%s is at its size limit (%d) — research urban technologies to grow further." % [c.cname, city_tile_cap(n)]
+	var cost := annex_cost(c)
+	var nat = nations[n]
+	for k: String in cost:
+		if nat.res.get(k, 0.0) < cost[k]:
+			return "Not enough %s (%d needed)." % [k.capitalize(), int(cost[k])]
+	return ""
+
+
+## the city that would receive this tile if annexed (null if none)
+func annex_target(n: int, tile: int):
+	var tiles: Dictionary = world.tiles
+	for e in range(tiles.nbr_off[tile], tiles.nbr_off[tile + 1]):
+		var cid := city_tile_of[tiles.nbr[e]]
+		if cid >= 0 and cities[cid].nation_id == n:
+			return cities[cid]
+	return null
+
+
+func annex_tile(n: int, tile: int) -> bool:
+	if can_annex(n, tile) != "":
+		return false
+	var c = annex_target(n, tile)
+	if c == null:
+		return false
+	var cost := annex_cost(c)
+	var nat = nations[n]
+	for k: String in cost:
+		nat.res[k] -= cost[k]
+	c.tiles.append(tile)
+	city_tile_of[tile] = c.id
+	tile_city[tile] = c.id
+	map_dirty = true
+	notify(n, "%s annexed a new district tile (%d / %d)." % [c.cname, c.tiles.size(), city_tile_cap(n)], "good")
+	return true
+
+
 # ---------------- buildings ----------------
 
 ## Can `bid` be built in slot `slot` of `tile`? "" if yes, else the reason.
@@ -625,8 +725,10 @@ func can_build(n: int, tile: int, slot: int, bid: String) -> String:
 	var bdef: Dictionary = Data.buildings[bid]
 	if owner[tile] != n:
 		return "Not your territory."
-	if tile_city[tile] == -1:
-		return "Too far from a city."
+	if city_tile_of[tile] == -1:
+		return "Buildings need city tiles — annex this tile into a city first."
+	if cities[city_tile_of[tile]].nation_id != n:
+		return "This district belongs to another nation's city."
 	if slot < 0 or slot >= slots_per_tile():
 		return "Invalid slot."
 	if slot_building(tile, slot) != null:
@@ -1308,20 +1410,18 @@ func _economy_tick(n: int) -> void:
 	var upkeep_gold := 0.0
 	var total_pop := 0
 
-	# bucket this nation's worked tiles by city
-	var city_tiles := {}
-	for t in range(world.NT):
-		if owner[t] == n and tile_city[t] >= 0:
-			if not city_tiles.has(tile_city[t]):
-				city_tiles[tile_city[t]] = []
-			city_tiles[tile_city[t]].append(t)
+	# per-tile production is cached for the UI (tile panel / hover)
+	var add_prod := func(t: int, k: String, amt: float) -> void:
+		if not tile_prod.has(t):
+			tile_prod[t] = {}
+		tile_prod[t][k] = tile_prod[t].get(k, 0.0) + amt
 
 	for c in cities_of(n):
 		total_pop += c.pop
-		var tiles_c: Array = city_tiles.get(c.id, [])
-		# collect this city's finished buildings across all tile slots
+		# buildings live ONLY on the city's own tiles
 		var blds: Array = []          # [tile, slot, entry]
-		for t: int in tiles_c:
+		for t: int in c.tiles:
+			tile_prod.erase(t)
 			var arr = buildings[t]
 			if arr == null:
 				continue
@@ -1359,6 +1459,7 @@ func _economy_tick(n: int) -> void:
 				var mult: float = 1.0 + nat.modv(k) + nat.modv("b:" + b.id) + c.spec_mod(k)
 				var out: float = bdef.yields[k] * bm * maxf(0.0, mult) * frac
 				income[k] = income.get(k, 0.0) + out
+				add_prod.call(t, k, out)
 			# deposit bonus: once per tile, to the first matching building
 			var dep: String = deposit[t]
 			if dep != "" and not dep_granted.has(t):
@@ -1368,17 +1469,26 @@ func _economy_tick(n: int) -> void:
 					var dep_mult: float = 2.0 if b.id == "deepMine" else 1.0
 					for k: String in ddef.yields:
 						income[k] = income.get(k, 0.0) + ddef.yields[k] * frac * dep_mult
+						add_prod.call(t, k, ddef.yields[k] * frac * dep_mult)
 			# city center also harvests its tile's dominant biome
 			if b.id == "cityCenter":
 				var byields: Dictionary = Data.biomes[world.t_biome[t]].yields
 				for k: String in byields:
 					income[k] = income.get(k, 0.0) + float(byields[k]) * 0.5
-		# undeveloped tiles trickle
-		for t: int in tiles_c:
-			if tile_built_count(t) == 0:
-				var byields2: Dictionary = Data.biomes[world.t_biome[t]].yields
-				for k: String in byields2:
-					income[k] = income.get(k, 0.0) + float(byields2[k]) * 0.2
+					add_prod.call(t, k, float(byields[k]) * 0.5)
+
+	# territory (and empty city tiles) trickle a small share of their biome yields
+	for t in range(world.NT):
+		if owner[t] != n:
+			continue
+		if tile_built_count(t) == 0:
+			tile_prod.erase(t)
+			var byields2: Dictionary = Data.biomes[world.t_biome[t]].yields
+			for k: String in byields2:
+				var amt := float(byields2[k]) * 0.2
+				if amt > 0.0:
+					income[k] = income.get(k, 0.0) + amt
+					add_prod.call(t, k, amt)
 
 	# unit upkeep
 	var unit_upkeep := 0.0
@@ -1613,6 +1723,10 @@ func _capture_city(n: int, c) -> void:
 	c.pop = maxi(1, c.pop - 1)
 	c.training = {}
 	owner[c.tile] = n
+	# the whole city (all its district tiles) changes hands
+	for ct: int in c.tiles:
+		owner[ct] = n
+		tile_city[ct] = c.id
 	var tiles: Dictionary = world.tiles
 	for e in range(tiles.nbr_off[c.tile], tiles.nbr_off[c.tile + 1]):
 		var nb: int = tiles.nbr[e]
@@ -1757,7 +1871,7 @@ func save_game() -> void:
 	for c in cities:
 		data.cities.append({"id": c.id, "tile": c.tile, "nation": c.nation_id, "name": c.cname,
 			"pop": c.pop, "growth": c.growth, "spec": c.spec, "hp": c.hp, "training": c.training,
-			"orig_cap": c.is_original_capital})
+			"orig_cap": c.is_original_capital, "tiles": c.tiles})
 	for u in units:
 		data.units.append({"id": u.id, "type": u.type, "nation": u.nation_id, "tile": u.tile,
 			"hp": u.hp, "exp": u.exp, "path": u.path, "order": u.order})
@@ -1857,7 +1971,14 @@ func setup_from_save(data: Dictionary) -> void:
 		c.hp = float(cd.hp)
 		c.training = cd.training
 		c.is_original_capital = cd.orig_cap
+		c.tiles = cd.get("tiles", [c.tile]).map(func(x): return int(x))
 		cities.append(c)
+	city_tile_of = PackedInt32Array()
+	city_tile_of.resize(nt)
+	city_tile_of.fill(-1)
+	for c2 in cities:
+		for ct: int in c2.tiles:
+			city_tile_of[ct] = c2.id
 	diplo = Diplomacy.new(self)
 	diplo.relations = data.diplo.relations
 	diplo.statuses = data.diplo.statuses

@@ -66,12 +66,34 @@ func _act_economy(n: int) -> void:
 		if best_tile >= 0:
 			game.claim_tile(n, best_tile)
 
-	# construction: sample owned tiles with free slots, pick best (slot, building)
+	# annex territory into cities when capacity + resources allow, preferring
+	# high-value compositions (deposits, food-rich biomes)
+	if rng.randf() < 0.5:
+		for c in game.cities_of(n):
+			if c.tiles.size() >= game.city_tile_cap(n):
+				continue
+			var best_ax := -1
+			var best_av := 0.0
+			var tiles: Dictionary = game.world.tiles
+			for ct: int in c.tiles:
+				for e in range(tiles.nbr_off[ct], tiles.nbr_off[ct + 1]):
+					var nb: int = tiles.nbr[e]
+					if game.can_annex(n, nb) != "":
+						continue
+					var v := _tile_value(nb)
+					if v > best_av:
+						best_av = v
+						best_ax = nb
+			if best_ax >= 0:
+				game.annex_tile(n, best_ax)
+				break
+
+	# construction: buildings only exist on city tiles — sample those
 	var open_tiles: Array = []
-	for i in range(game.world.NT):
-		if game.owner[i] == n and game.tile_city[i] >= 0 \
-			and game.tile_built_count(i) < game.slots_per_tile():
-			open_tiles.append(i)
+	for c2 in game.cities_of(n):
+		for ct2: int in c2.tiles:
+			if game.tile_built_count(ct2) < game.slots_per_tile():
+				open_tiles.append(ct2)
 	if not open_tiles.is_empty():
 		open_tiles.shuffle()
 		var best_pick: Array = []      # [tile, slot, bid]

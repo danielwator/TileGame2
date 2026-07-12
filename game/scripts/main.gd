@@ -180,7 +180,8 @@ func refresh_map() -> void:
 	globe.set_borders(
 		func(ti: int) -> int: return game.owner[ti],
 		func(n: int) -> Color: return game.nations[n].color,
-		func(ti: int) -> bool: return game.fog_state(game.human_id, ti) > 0)
+		func(ti: int) -> bool: return game.fog_state(game.human_id, ti) > 0,
+		func(ti: int) -> int: return game.city_tile_of[ti])
 
 
 func _process(delta: float) -> void:
@@ -317,7 +318,8 @@ func _run_selftest() -> void:
 	var aff: Dictionary = g.branch_affinity(hu)
 	_check("branch affinity leans toward researched branches", aff["mil"] >= aff["com"])
 	# grant a starter tech set so build/train/policy paths can be exercised
-	for tid3 in ["hunting", "agriculture", "warbands", "tribalCouncil", "masonry", "bronzeWorking"]:
+	# (deliberately NO cityTiles techs — the annex test gates on those)
+	for tid3 in ["hunting", "agriculture", "warbands", "tribalCouncil", "bronzeWorking"]:
 		nat.researched[tid3] = true
 	nat.mods_dirty = true
 
@@ -360,13 +362,32 @@ func _run_selftest() -> void:
 			slot_ok = false
 	_check("every tile has %d district slots" % g.slots_per_tile(), slot_ok)
 
-	# --- build a farm on a valid slot ---
+	# --- city expansion: buildings need city tiles; annexation grows them ---
+	var cap_city = g.city_at(nat.capital_tile)
+	_check("new city starts as a single city tile", cap_city != null and cap_city.tiles.size() == 1)
+	var terr := -1
+	var tiles_d: Dictionary = g.world.tiles
+	for e in range(tiles_d.nbr_off[nat.capital_tile], tiles_d.nbr_off[nat.capital_tile + 1]):
+		var nb: int = tiles_d.nbr[e]
+		if g.owner[nb] == hu and g.city_tile_of[nb] == -1 and g.world.t_land[nb] == 1:
+			terr = nb
+			break
+	_check("territory cannot hold buildings",
+		terr >= 0 and g.can_build(hu, terr, 0, "farm").begins_with("Buildings need city tiles"))
+	nat.res.materials = 500.0
+	nat.res.gold = 300.0
+	nat.res.influence = 300.0
+	_check("annex blocked without research (cap 1)", g.can_annex(hu, terr) != "")
+	nat.researched["masonry"] = true   # +1 cityTiles
+	nat.mods_dirty = true
+	_check("annex works after urban research", g.can_annex(hu, terr) == "" and g.annex_tile(hu, terr))
+	_check("annexed tile is a city district", g.city_tile_of[terr] == cap_city.id and cap_city.tiles.size() == 2)
+
+	# --- build a farm on a valid slot (city tiles only now) ---
 	nat.res.materials = 500.0
 	var farm_tile := -1
 	var farm_slot := -1
-	for i in range(g.world.NT):
-		if g.owner[i] != hu:
-			continue
+	for i in cap_city.tiles:
 		var s2 := g.best_slot_for(hu, i, "farm")
 		if s2 >= 0:
 			farm_tile = i
@@ -395,7 +416,6 @@ func _run_selftest() -> void:
 	_check("second building coexists on same tile", second != "" and g.tile_built_count(farm_tile) >= 2)
 
 	# --- train a warrior ---
-	var cap_city = g.city_at(g.nations[hu].capital_tile)
 	nat.res.materials = 500.0
 	var trained: bool = cap_city != null and g.train_unit(hu, cap_city, "warrior")
 	_check("warrior training queued", trained)
