@@ -455,6 +455,57 @@ func _run_selftest() -> void:
 			vis += 1
 	_check("fog hides most of the map", vis < g.world.NT / 2)
 
+	# --- fog is NOT permanent: vision leaves with the unit ---
+	var scout2 = g.spawn_unit(hu, "scout", cap_city.tile)
+	var far := -1
+	var dfar := SphereGrid.bfs_distances(g.world.tiles, [cap_city.tile])
+	for i in range(g.world.NT):
+		if dfar[i] >= 12 and g.world.t_land[i] == 1:
+			far = i
+			break
+	if far >= 0:
+		scout2.tile = far
+		g.fog.recompute()
+		_check("scout grants vision at its position", g.fog.state(hu, far) == 2)
+		scout2.tile = cap_city.tile
+		g.fog.recompute()
+		_check("vision fades when the scout leaves", g.fog.state(hu, far) == 0)
+	scout2.hp = -1
+	g.cull_dead_units()
+
+	# --- mid-depth ocean tier exists (islanders can sail out in Classical) ---
+	var has_mid_ocean := false
+	for i in range(g.world.NT):
+		if g.world.t_biome[i] == "ocean":
+			has_mid_ocean = true
+			break
+	_check("mid-depth 'ocean' tier exists between coast and abyss", has_mid_ocean)
+
+	# --- claim cost grows exponentially with distance ---
+	var near_cost := -1.0
+	var far_cost := -1.0
+	for i in range(g.world.NT):
+		if g.world.t_biome[i] != "grassland" or g.owner[i] != -1:
+			continue
+		var dd := g.effective_dist(hu, i)
+		if dd == 2 and near_cost < 0:
+			near_cost = g.claim_cost(hu, i)
+		elif dd == 6 and far_cost < 0:
+			far_cost = g.claim_cost(hu, i)
+	if near_cost > 0 and far_cost > 0:
+		_check("claim cost is exponential with distance", far_cost > near_cost * 3.0)
+
+	# --- AI proposals need player consent ---
+	g.queue_proposal(1, "alliance")
+	_check("proposal queued for the player", g.pending_proposals.size() == 1)
+	g.resolve_proposal(true)
+	_check("accepting forms the alliance", g.diplo.status(hu, 1) == "alliance")
+	g.diplo.break_pact(hu, 1)
+	_check("pact can be broken", g.diplo.status(hu, 1) == "peace")
+	var rel_before: float = g.diplo.rel(hu, 2)
+	g.nations[hu].res.gold = 200.0
+	_check("gift improves relations", g.diplo.send_gift(hu, 2, 100.0) == "" and g.diplo.rel(hu, 2) > rel_before)
+
 	# --- diplomacy trade deal ---
 	g.diplo.make_peace(hu, 1)
 	g.diplo.relations[hu][2] = 60.0

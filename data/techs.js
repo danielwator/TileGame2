@@ -121,7 +121,7 @@
   def(2,'com','luxuryTrade','Luxury Trade',{mod:{gold:0.05,influence:0.05}},'Silk and spice buy prestige abroad.');
   def(2,'sci','philosophy','Philosophy',{unlockB:['library'],mod:{science:0.10}},'Asking why, professionally.');
   def(2,'sci','mathematics','Mathematics',{mod:{science:0.10}},'The universe turns out to be written in it.');
-  def(2,'sci','astronomy','Astronomy',{mod:{science:0.05,moveSpeed:0.05}},'Stars become a map for ships and seasons.');
+  def(2,'sci','astronomy','Astronomy',{mod:{science:0.05,moveSpeed:0.05},flag:['oceanTravel']},'Stars become a map for ships and seasons. Ships may brave the open Ocean — islanders can finally reach their neighbors.');
   def(2,'sci','classicalMedicine','Classical Medicine',{mod:{healRate:0.25}},'Observation replaces exorcism, mostly.');
   def(2,'sci','literature','Literature',{mod:{influence:0.10}},'Epics carry your name past every border.');
   def(2,'sci','engineering','Engineering',{mod:{buildCost:-0.05}},'Cranes, levers and arrogance.');

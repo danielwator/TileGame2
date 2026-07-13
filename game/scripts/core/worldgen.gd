@@ -87,7 +87,11 @@ const TT_COLORS: Array[Color] = [
 	Color(0.16, 0.34, 0.68),   # River
 ]
 
-# their tile types -> AEONS gameplay biome ids (data/biomes.js unchanged)
+# their tile types -> AEONS gameplay biome ids (data/biomes.js unchanged).
+# NOTE: TT.OCEAN is split by depth at aggregation time — mid-depth open sea
+# becomes "ocean" (crossable with Classical-era ocean travel) and only the
+# true abyss becomes "deepOcean" (Renaissance Cartography), so islanders
+# aren't trapped at home until the late game.
 const TT_TO_BIOME := {
 	TT.OCEAN: "deepOcean", TT.SHALLOW: "coast", TT.CORAL: "coast",
 	TT.BEACH: "plains", TT.MANGROVE: "wetland",
@@ -292,7 +296,13 @@ static func generate(user_params: Dictionary) -> Dictionary:
 			tally[ti * TT_COUNT + TT.OCEAN] = 1
 			total = 1
 		t_ttype[ti] = best_tt
+		# depth split for open ocean: mid-depth sea is navigable a whole era
+		# earlier than the abyss
+		var mean_e: float = t_elev_sum[ti] / maxf(1.0, float(t_cnt[ti]))
+		var deep_tile: bool = mean_e < sea - 0.18
 		var bid: String = TT_TO_BIOME[best_tt]
+		if best_tt == TT.OCEAN and not deep_tile:
+			bid = "ocean"
 		t_biome[ti] = bid
 		t_land[ti] = 0 if Data.biomes[bid].water else 1
 		# --- largest-remainder apportionment into SLOTS_PER_TILE slots ---
@@ -316,6 +326,8 @@ static func generate(user_params: Dictionary) -> Dictionary:
 		var slots := PackedInt32Array()
 		for q: Array in quotas:
 			var slot_bid: String = TT_TO_BIOME[q[0]]
+			if q[0] == TT.OCEAN and not deep_tile:
+				slot_bid = "ocean"
 			var bio_idx: int = Data.biome_index[slot_bid]
 			for k in range(q[1]):
 				slots.append(bio_idx)

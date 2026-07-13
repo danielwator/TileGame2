@@ -10,6 +10,7 @@ var game
 var relations: Array = []    # 2D array [a][b] float
 var statuses: Array = []     # 2D array [a][b] String
 var deals: Array = []        # {a, b, ticks}
+var prop_cooldown := {}      # AI id -> tick before it may petition the human again
 
 const DEAL_TICKS := 100
 
@@ -110,6 +111,53 @@ func make_deal(a: int, b: int) -> void:
 	deals.append({"a": a, "b": b, "ticks": DEAL_TICKS})
 	shift_rel(a, b, 12)
 	game.notify_all("%s and %s signed a trade agreement." % [game.nations[a].display_name, game.nations[b].display_name], "good")
+
+
+# ---------------- direct actions ----------------
+
+## pay gold to sweeten relations
+func send_gift(a: int, b: int, amount := 100.0) -> String:
+	if game.nations[a].res.gold < amount:
+		return "Not enough Gold."
+	game.nations[a].res.gold -= amount
+	game.nations[b].res.gold += amount * 0.5   # half arrives as actual goods
+	shift_rel(a, b, 12)
+	game.notify(b, "%s sent a gift of goods and gold." % game.nations[a].display_name, "good")
+	return ""
+
+
+## public condemnation: relations tank, your people rally
+func denounce(a: int, b: int) -> void:
+	shift_rel(a, b, -25)
+	game.nations[a].res.influence += 15.0
+	game.notify_all("%s denounced %s before the world!" % [
+		game.nations[a].display_name, game.nations[b].display_name], "warn")
+
+
+## strong-arm a weaker nation for gold
+func demand_tribute(a: int, b: int) -> String:
+	var ratio: float = game.nation_power(a) / maxf(1.0, game.nation_power(b))
+	if ratio > 1.4 and rel(a, b) > -60.0:
+		var tribute: float = minf(150.0, game.nations[b].res.gold * 0.25)
+		game.nations[b].res.gold -= tribute
+		game.nations[a].res.gold += tribute
+		shift_rel(a, b, -15)
+		game.notify(a, "%s pays %d Gold in tribute." % [game.nations[b].display_name, int(tribute)], "good")
+		return ""
+	shift_rel(a, b, -10)
+	return "%s scoffs at your demand." % game.nations[b].display_name
+
+
+## dissolve an alliance or non-aggression pact
+func break_pact(a: int, b: int) -> String:
+	if statuses[a][b] != "alliance" and statuses[a][b] != "nap":
+		return "No pact to break."
+	statuses[a][b] = "peace"
+	statuses[b][a] = "peace"
+	shift_rel(a, b, -20)
+	game.notify_all("%s broke its pact with %s." % [
+		game.nations[a].display_name, game.nations[b].display_name], "warn")
+	return ""
 
 
 func _cancel_deals(a: int, b: int) -> void:

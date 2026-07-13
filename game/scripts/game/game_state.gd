@@ -12,11 +12,13 @@ signal toast(msg: String, kind: String)
 signal event_popup(nation_id: int, ev: Dictionary, has_choice: bool)
 signal perk_offer(nation_id: int)
 signal research_offer(nation_id: int)
+signal diplo_proposal()
 signal victory(nation_id: int, victory_id: String)
 
 const SAVE_VERSION := 3
-# real-time pace: one simulation tick every 2.4 s at 1x speed
-const TICK_SECONDS := 2.4
+# real-time pace: one simulation tick every 7.2 s at 1x speed —
+# a deliberately slow burn; the 2x/4x buttons are there for a reason
+const TICK_SECONDS := 7.2
 # uniform abstract calendar: every tick advances the same number of years
 # regardless of era (eras are equal-length in ticks, gated purely by research)
 const YEARS_PER_TICK := 1.0
@@ -191,6 +193,7 @@ var over := false
 var winner := -1
 var victory_id := ""
 var pending_choice := {}
+var pending_proposals: Array = []   # AI offers awaiting the player: {from, kind}
 
 var _next_id := 1
 var _avg_edge := 0.0
@@ -547,8 +550,9 @@ func effective_dist(n: int, tile: int) -> int:
 func claim_cost(n: int, tile: int) -> float:
 	var b: Dictionary = Data.biomes[world.t_biome[tile]]
 	var d := effective_dist(n, tile)
-	# territory gets sharply more expensive the farther it lies from your cities
-	return CLAIM_BASE * float(b.infMul) * (1.0 + 0.5 * (d - 1)) * maxf(0.2, 1.0 + nations[n].modv("claimCost"))
+	# EXPONENTIAL with distance: land far from your cities is a luxury —
+	# d=1 x1, d=3 x2, d=5 x3.8, d=8 x10.5 (before biome/tech modifiers)
+	return CLAIM_BASE * float(b.infMul) * pow(1.4, d - 1) * maxf(0.2, 1.0 + nations[n].modv("claimCost"))
 
 
 func can_claim(n: int, tile: int) -> String:
@@ -602,12 +606,14 @@ func claim_tile(n: int, tile: int) -> bool:
 
 
 func border_upkeep(n: int) -> float:
+	# every TERRITORY tile costs Influence every tick, growing exponentially
+	# with distance from your cities; city tiles maintain themselves
 	var total := 0.0
 	for i in range(world.NT):
-		if owner[i] != n or city_at(i) != null:
+		if owner[i] != n or city_tile_of[i] >= 0:
 			continue
 		var d := effective_dist(n, i)
-		total += BORDER_UPKEEP_BASE * (1.0 + 0.3 * (d - 1))
+		total += BORDER_UPKEEP_BASE * pow(1.25, d - 1)
 	return total * maxf(0.2, 1.0 + nations[n].modv("borderUpkeep"))
 
 
@@ -1086,6 +1092,41 @@ func spawn_hostiles(n: int, count: int) -> void:
 		var t: int = cand[rng.randi_range(0, cand.size() - 1)]
 		spawn_unit(-2, barb_type, t)
 	notify(n, "Raiders sighted near your borders!", "warn")
+
+
+# ---------------- diplomatic proposals (AI -> player consent) ----------------
+# Alliances, pacts, trade deals and peace offers from AIs are PROPOSALS the
+# player accepts or declines. Only war arrives uninvited.
+
+func queue_proposal(from: int, kind: String) -> void:
+	for p: Dictionary in pending_proposals:
+		if p.from == from and p.kind == kind:
+			return
+	pending_proposals.append({"from": from, "kind": kind})
+	diplo_proposal.emit()
+
+
+func resolve_proposal(accept: bool) -> void:
+	if pending_proposals.is_empty():
+		return
+	var p: Dictionary = pending_proposals.pop_front()
+	var from: int = p.from
+	diplo.prop_cooldown[str(from)] = tick_count + (90 if accept else 150)
+	if accept:
+		match p.kind:
+			"alliance":
+				diplo.form_alliance(from, human_id)
+			"nap":
+				diplo.sign_nap(from, human_id)
+			"trade":
+				if diplo.can_trade(from, human_id):
+					diplo.make_deal(from, human_id)
+			"peace":
+				diplo.make_peace(from, human_id)
+	else:
+		diplo.shift_rel(from, human_id, -4)
+	if not pending_proposals.is_empty():
+		diplo_proposal.emit()
 
 
 # ---------------- research / ages ----------------

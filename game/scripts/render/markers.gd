@@ -9,6 +9,12 @@ var main
 var _city_nodes := {}     # city id -> Node3D
 var _unit_nodes := {}     # unit id -> Node3D
 var _dep_nodes := {}      # tile -> Label3D
+var _prod_nodes := {}     # tile -> Label3D (per-tile yield readout)
+var _prod_tick := -1
+
+const PROD_ZOOM := 230.0  # camera distance under which yield labels appear
+const PROD_LETTER := {"food": "F", "materials": "M", "gold": "G", "science": "S",
+	"influence": "I", "coal": "C", "oil": "O", "circuits": "Ci"}
 
 const UNIT_COLORS := {
 	"civilian": Color(0.9, 0.9, 0.9),
@@ -31,6 +37,54 @@ func _process(_delta: float) -> void:
 	_update_cities()
 	_update_units()
 	_update_deposits()
+	_update_prod_labels()
+
+
+## floating per-tile yield readouts over the player's land when zoomed in —
+## no clicking needed to see what a tile earns
+func _update_prod_labels() -> void:
+	var game = main.game
+	var globe = main.globe
+	var close: bool = main.orbit != null and main.orbit.dist < PROD_ZOOM
+	if not close:
+		if not _prod_nodes.is_empty():
+			for t in _prod_nodes.keys():
+				_prod_nodes[t].queue_free()
+			_prod_nodes.clear()
+		return
+	var seen := {}
+	for t in game.tile_prod.keys():
+		if game.owner[t] != game.human_id:
+			continue
+		seen[t] = true
+		var lbl: Label3D = _prod_nodes.get(t)
+		if lbl == null:
+			lbl = Label3D.new()
+			lbl.font_size = 26
+			lbl.outline_size = 8
+			lbl.pixel_size = 0.016
+			lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			lbl.modulate = Color(0.85, 1.0, 0.85, 0.9)
+			add_child(lbl)
+			_prod_nodes[t] = lbl
+			lbl.set_meta("tick", -1)
+		if int(lbl.get_meta("tick")) != game.tick_count:
+			lbl.set_meta("tick", game.tick_count)
+			lbl.text = _prod_short(game.tile_prod[t])
+			lbl.position = globe.tile_world_pos(t, 0.6)
+	for t in _prod_nodes.keys():
+		if not seen.has(t):
+			_prod_nodes[t].queue_free()
+			_prod_nodes.erase(t)
+
+
+func _prod_short(prod: Dictionary) -> String:
+	var parts: Array = []
+	for k: String in PROD_LETTER:
+		var v: float = prod.get(k, 0.0)
+		if v >= 0.25:
+			parts.append(("%.0f" if v >= 1.95 else "%.1f") % v + PROD_LETTER[k])
+	return " ".join(parts)
 
 
 func _update_cities() -> void:

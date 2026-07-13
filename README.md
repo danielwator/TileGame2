@@ -4,7 +4,7 @@ A globe-spanning grand-strategy game: one procedurally generated planet, eight a
 (Ancient → Near Future), ~290 technologies, influence-driven borders, war, diplomacy,
 trade, fog of war and five victory conditions — built in **Godot 4.4**.
 
-![engine](https://img.shields.io/badge/engine-Godot%204.4-478cbf) ![status](https://img.shields.io/badge/version-0.6.0-e8c15a)
+![engine](https://img.shields.io/badge/engine-Godot%204.4-478cbf) ![status](https://img.shields.io/badge/version-0.8.0-e8c15a)
 
 Eras are equal-length and research-gated; the calendar is uniform (1 year per tick in
 every era) and the pace is deliberately unhurried — use the 2×/4× speed buttons when
@@ -66,19 +66,18 @@ are allowed and apply their own biome multipliers. Plain territory just trickles
 share of its biome yields and costs steeply more Influence to claim the farther it lies
 from your cities.
 
-**World generation** (fully seeded and deterministic): tectonic plates with motion
-vectors → boundary stress (mountain belts, island arcs, rifts, trenches, hotspot
-chains) → percentile sea level → latitude temperature with altitude lapse →
-prevailing-wind moisture advection with orographic rain shadows, ITCZ and horse-latitude
-belts → Whittaker biome classification → biome-weighted tile deposits.
+**Diplomacy & fog**: AI offers of alliance, pacts, trade and peace arrive as proposals
+you accept or decline — only war is uninvited. Gifts, tribute demands, denouncements
+and pact-breaking round out the toolbox. Vision is live, not permanent: you see around
+territory, cities (farther) and units (scouts farther still); the map re-fogs behind you.
 
 ## Testing
 
 ```
 set AEONS_TEST=1 & tools\Godot_v4.4.1-stable_win64_console.exe --headless --path game
 ```
-runs a 19-check integration suite (founding, claiming, building, training, combat,
-fog, trade, policies, save/load, 400-tick stability).
+runs a 39-check integration suite (research draws, annexation, districts, combat,
+fog transience, diplomacy proposals, exponential costs, save/load, 500-tick stability).
 
 Other dev env vars (still `AEONS_`-prefixed for compatibility): `AEONS_SEED`
 (quick-start, skip menu), `AEONS_SIM=<n>` (run n ticks at startup),

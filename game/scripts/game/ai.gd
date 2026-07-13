@@ -276,16 +276,33 @@ func _act_diplomacy(n: int) -> void:
 			continue
 		var st: String = game.diplo.status(n, b)
 		var r: float = game.diplo.rel(n, b)
+		var to_human: bool = b == game.human_id
+		# anything friendly aimed at the PLAYER is a proposal, never automatic
+		# (war is the exception — nobody asks permission for that)
 		if st == "war":
 			var ratio: float = game.nation_power(n) / maxf(1.0, game.nation_power(b))
 			if ratio < 0.7 or nat.war_weariness > 0.5:
 				if rng.randf() < 0.4:
-					game.diplo.make_peace(n, b)
+					if to_human:
+						if game.diplo.prop_cooldown.get(str(n), 0) <= game.tick_count:
+							game.queue_proposal(n, "peace")
+					else:
+						game.diplo.make_peace(n, b)
 		else:
-			if r > 20.0 and game.diplo.can_trade(n, b) and rng.randf() < 0.25:
-				game.diplo.make_deal(n, b)
-			if r > 60.0 and st == "peace" and rng.randf() < 0.08:
-				game.diplo.form_alliance(n, b)
+			var may_petition: bool = not to_human \
+				or game.diplo.prop_cooldown.get(str(n), 0) <= game.tick_count
+			if r > 20.0 and game.diplo.can_trade(n, b) and rng.randf() < 0.25 and may_petition:
+				if to_human:
+					game.queue_proposal(n, "trade")
+				else:
+					game.diplo.make_deal(n, b)
+			if r > 60.0 and st == "peace" and rng.randf() < 0.08 and may_petition:
+				if to_human:
+					game.queue_proposal(n, "alliance")
+				else:
+					game.diplo.form_alliance(n, b)
+			if r > 10.0 and st == "peace" and rng.randf() < 0.05 and to_human and may_petition:
+				game.queue_proposal(n, "nap")
 			if r < -35.0 and st == "peace" and rng.randf() < nat.ai_aggression * 0.15:
 				var ratio2: float = game.nation_power(n) / maxf(1.0, game.nation_power(b))
 				if ratio2 > 1.4:

@@ -45,6 +45,10 @@ func _rot_speed() -> float:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var e := event as InputEventMouseButton
+		# UI takes priority: while the cursor is over any control (panels,
+		# scroll lists...), the wheel scrolls the UI, not the camera
+		if get_viewport().gui_get_hovered_control() != null:
+			return
 		if e.button_index == MOUSE_BUTTON_WHEEL_UP:
 			dist = clampf(dist * 0.93, min_dist, max_dist)
 		elif e.button_index == MOUSE_BUTTON_WHEEL_DOWN:

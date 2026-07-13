@@ -55,6 +55,7 @@ func setup(m) -> void:
 	game.event_popup.connect(_on_event_popup)
 	game.perk_offer.connect(_on_perk_offer)
 	game.research_offer.connect(_on_research_offer)
+	game.diplo_proposal.connect(_on_diplo_proposal)
 	game.victory.connect(_on_victory)
 	if not game.nations[game.human_id].research_options.is_empty():
 		_on_research_offer(game.human_id)
@@ -1037,14 +1038,32 @@ func _open_diplo_window() -> void:
 		if st == "war":
 			_btn(h, "Offer Peace", func() -> void: _try_peace(nn))
 		else:
-			_btn(h, "Declare War", func() -> void:
+			_btn(h, "War", func() -> void:
 				game.diplo.declare_war(me, nn)
-				_open_diplo_window())
-			_btn(h, "Trade Deal", func() -> void: _try_trade(nn), game.diplo.can_trade(me, nn))
+				_open_diplo_window(), true, "Declare war. Their allies will join them.")
+			_btn(h, "Trade", func() -> void: _try_trade(nn), game.diplo.can_trade(me, nn),
+				"Propose a trade agreement (+Gold for both sides).")
 			if st == "peace":
-				_btn(h, "Non-Aggression", func() -> void: _try_nap(nn))
+				_btn(h, "Pact", func() -> void: _try_nap(nn), true, "Offer a non-aggression pact.")
 			if st != "alliance":
-				_btn(h, "Alliance", func() -> void: _try_alliance(nn))
+				_btn(h, "Ally", func() -> void: _try_alliance(nn), true, "Propose an alliance (needs 55+ relations).")
+			_btn(h, "Gift", func() -> void:
+				var err: String = game.diplo.send_gift(me, nn, 100.0)
+				if err != "":
+					_on_toast(err, "warn")
+				_open_diplo_window(), true, "Send 100 Gold to improve relations (+12).")
+			_btn(h, "Demand", func() -> void:
+				var err2: String = game.diplo.demand_tribute(me, nn)
+				if err2 != "":
+					_on_toast(err2, "warn")
+				_open_diplo_window(), true, "Demand tribute. Works only from a position of strength; sours relations either way.")
+			_btn(h, "Denounce", func() -> void:
+				game.diplo.denounce(me, nn)
+				_open_diplo_window(), true, "Condemn them publicly: -25 relations, +15 Influence.")
+			if st == "alliance" or st == "nap":
+				_btn(h, "Break Pact", func() -> void:
+					game.diplo.break_pact(me, nn)
+					_open_diplo_window(), true, "Dissolve the pact (-20 relations).")
 	var deals_l := Label.new()
 	deals_l.text = "Active trade deals: %d / %d" % [game.diplo.deal_count(me), game.diplo.trade_cap(me)]
 	deals_l.add_theme_color_override("font_color", COL_DIM)
@@ -1180,6 +1199,38 @@ func _on_perk_offer(_n: int) -> void:
 			game.pick_perk(game.human_id, pid2)
 			_close_dialog())
 		row.add_child(btn)
+
+
+const PROPOSAL_TEXT := {
+	"alliance": ["proposes an ALLIANCE", "Mutual defense and shared vision. Their wars may become your wars."],
+	"nap": ["offers a NON-AGGRESSION PACT", "A formal promise not to attack each other."],
+	"trade": ["proposes a TRADE AGREEMENT", "Both nations gain Gold each tick while the deal lasts."],
+	"peace": ["sues for PEACE", "They wish to end the war."],
+}
+
+
+func _on_diplo_proposal() -> void:
+	if _dialog != null or game.pending_proposals.is_empty():
+		return
+	var p: Dictionary = game.pending_proposals[0]
+	var nat = game.nations[p.from]
+	var txt: Array = PROPOSAL_TEXT.get(p.kind, ["proposes something", ""])
+	var v := _dialog_box("%s %s" % [nat.display_name, txt[0]], nat.color)
+	var d := Label.new()
+	d.text = "%s\nRelations: %d" % [txt[1], int(game.diplo.rel(game.human_id, p.from))]
+	d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	d.custom_minimum_size = Vector2(440, 0)
+	v.add_child(d)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 12)
+	v.add_child(row)
+	_btn(row, "  Accept  ", func() -> void:
+		_close_dialog()
+		game.resolve_proposal(true))
+	_btn(row, "  Decline  ", func() -> void:
+		_close_dialog()
+		game.resolve_proposal(false))
 
 
 func _on_victory(n: int, vid: String) -> void:

@@ -42,7 +42,7 @@
   def('spearman', 'Spearman', 'spearcraft', 'melee', { materials: 50 }, 0.3,
     6, 8, 32, 0.5, 1, 'Braced points. +50% defense vs cavalry.', { notes: '+50% vs cavalry.' });
   def('galley', 'Galley', 'sailing', 'naval', { materials: 55 }, 0.4,
-    6, 5, 30, 1.0, 2, 'Coast-hugging oars. Cannot enter Ocean until The Compass.');
+    6, 5, 30, 1.0, 2, 'Coast-hugging oars. Cannot enter open Ocean until Astronomy.');
 
   /* ---------- classical ---------- */
   def('swordsman', 'Swordsman', 'swordsmanship', 'melee', { materials: 70, gold: 10 }, 0.4,

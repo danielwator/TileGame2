@@ -5,6 +5,21 @@
 'use strict';
 window.CHANGELOG = [
   {
+    version: '0.8.0',
+    date: '2026-07-12',
+    title: 'Consent diplomacy, living fog, island freedom',
+    changes: [
+      'DIPLOMACY: nothing friendly is automatic anymore. AI offers of alliance, non-aggression, trade and peace arrive as PROPOSALS you accept or decline (war still arrives uninvited). New actions: Send Gift (+relations for Gold), Demand Tribute (extort weaker rivals), Denounce (−25 relations, +15 Influence) and Break Pact.',
+      'FOG OF WAR is no longer permanent: you see only around your territory (+1), city tiles (+3 — cities watch farther), units (their sight; scouts farther) and allied vision. Leave, and the map re-fogs. Satellites remains the one source of permanent (dimmed) global terrain intel.',
+      'ISLAND FREEDOM: open ocean now has two gameplay tiers — mid-depth seas are crossable once Classical-era Astronomy is researched, so island starts can reach their neighbors five eras earlier; only the abyssal deep still waits for Renaissance Cartography.',
+      'INFLUENCE: claiming territory now costs exponentially more with distance from your cities (×1.4 per ring), and holding it drains Influence every tick, also exponential (×1.25 per ring) — far-flung land is a continuous commitment, not a one-time purchase.',
+      'Tiles show their yields on the map: floating per-tile production labels (e.g. "2F 1M") appear over your land when zoomed in — no clicking required.',
+      'Pace slowed 3×: one tick every 7.2 s at 1× speed.',
+      'The mouse wheel now always scrolls UI lists when the cursor is over a panel — the camera only zooms over open map.',
+      'Self-test grown to 39 checks (fog transience, ocean tiers, exponential costs, proposals, gifts, pacts).',
+    ],
+  },
+  {
     version: '0.7.0',
     date: '2026-07-12',
     title: 'Cities vs. territory, annexation, per-tile production',

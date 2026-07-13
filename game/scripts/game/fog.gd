@@ -1,13 +1,23 @@
 # ============================================================
-#  AEONS — fog of war (tile layer)
-#  0 UNKNOWN | 1 DISCOVERED (dim terrain intel) | 2 VISIBLE
-#  Visible = owned tiles + 2 rings, unit sight, allied vision.
+#  TileGame2 — fog of war (tile layer)
+#
+#  Vision is NOT permanent. Each tick a nation sees only:
+#   * its territory        (+1 ring)
+#   * its city tiles       (+3 rings — cities watch farther)
+#   * its units            (unit sight radius; scouts see farther)
+#   * everything its allies currently see
+#  Tiles outside that are UNKNOWN again — armies and borders can
+#  slip out of view. The one exception: the Satellites technology
+#  grants permanent (dimmed) terrain intel of the whole globe.
 # ============================================================
 class_name FogOfWar
 extends RefCounted
 
+const TERRITORY_RANGE := 1
+const CITY_RANGE := 3
+
 var game
-var discovered: Array = []   # per nation PackedByteArray
+var discovered: Array = []   # per nation PackedByteArray — satellite intel only
 var visible: Array = []
 
 
@@ -57,11 +67,17 @@ func recompute() -> void:
 		if not nat.alive:
 			continue
 		var bonus: int = nat.mod_int("vision")
-		var owned: Array = []
+		var territory: Array = []
+		var city_tiles: Array = []
 		for i in range(nt):
-			if game.owner[i] == n:
-				owned.append(i)
-		_spread(vis, owned, 2 + bonus)
+			if game.owner[i] != n:
+				continue
+			if game.city_tile_of[i] >= 0:
+				city_tiles.append(i)
+			else:
+				territory.append(i)
+		_spread(vis, territory, TERRITORY_RANGE + bonus)
+		_spread(vis, city_tiles, CITY_RANGE + bonus)
 		for u in game.units:
 			if u.nation_id == n:
 				_spread(vis, [u.tile], int(Data.units[u.type].sight) + bonus)
@@ -75,15 +91,9 @@ func recompute() -> void:
 					var u2 := va[i] | vb[i]
 					va[i] = u2
 					vb[i] = u2
-	# discovery persists
-	for n in range(game.nations.size()):
-		var d: PackedByteArray = discovered[n]
-		var v: PackedByteArray = visible[n]
-		for i in range(nt):
-			if v[i] == 1:
-				d[i] = 1
 
 
+## Satellites etc.: permanent (dimmed) terrain intel of the whole map.
 func reveal_all(nation_id: int) -> void:
 	var d: PackedByteArray = discovered[nation_id]
 	for i in range(d.size()):
