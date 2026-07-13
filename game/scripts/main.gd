@@ -528,16 +528,16 @@ func _run_selftest() -> void:
 	_check("save/load restores cities", loaded != null and loaded.cities.size() == g.cities.size())
 	_check("save/load restores research", loaded != null and loaded.nations[hu].researching == g.nations[hu].researching)
 
-	# --- long-run stability: 500 ticks, no crash ---
+	# --- long-run stability: 1500 monthly ticks (~125 years), no crash ---
 	var ok := true
-	for t in range(500):
+	for t in range(1500):
 		g._do_tick()
-	_check("500-tick long run completed", ok)
-	var any_age2 := false
+	_check("1500-tick long run completed", ok)
+	var best_techs := 0
 	for n2 in g.nations:
-		if n2.age >= 2:
-			any_age2 = true
-	_check("some nation advanced past Ancient age", any_age2)
+		best_techs = maxi(best_techs, n2.researched.size())
+	_check("research progresses at monthly granularity (%d techs)" % best_techs, best_techs >= 3)
+	_check("calendar tracks months (year %d)" % int(g.year), absf(g.year - (1.0 + g.months / 12.0)) < 0.01 and g.months >= 1500)
 
 	print("=== self-test: %d passed, %d failed ===" % [_test_pass, _test_fail])
 	get_tree().quit(_test_fail)

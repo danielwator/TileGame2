@@ -12,7 +12,7 @@ var statuses: Array = []     # 2D array [a][b] String
 var deals: Array = []        # {a, b, ticks}
 var prop_cooldown := {}      # AI id -> tick before it may petition the human again
 
-const DEAL_TICKS := 100
+const DEAL_TICKS := 240   # months (20 years)
 
 
 func _init(g) -> void:
@@ -167,17 +167,17 @@ func _cancel_deals(a: int, b: int) -> void:
 			deals.remove_at(i)
 
 
-## per-tick: deal income + slow opinion drift
+## per-tick (monthly): deal income + yearly opinion drift
 func tick() -> void:
 	for d in deals:
-		var gain: float = 2.0 + game.nations[d.a].age
+		var gain: float = (2.0 + game.nations[d.a].age) / 12.0   # per month
 		game.nations[d.a].res.gold += gain
 		game.nations[d.b].res.gold += gain
 		d.ticks -= 1
 	for i in range(deals.size() - 1, -1, -1):
 		if deals[i].ticks <= 0:
 			deals.remove_at(i)
-	if game.tick_count % 10 != 0:
+	if game.tick_count % 12 != 0:   # opinions drift once a year
 		return
 	var n: int = game.nations.size()
 	for a in range(n):
@@ -187,17 +187,17 @@ func tick() -> void:
 			var drift := 0.0
 			# borders touching create friction
 			if _borders_touch(a, b):
-				drift -= 0.3
+				drift -= 0.15
 			# same age = mutual respect; big age gap = contempt
-			drift += 0.15 if game.nations[a].age == game.nations[b].age else -0.1
+			drift += 0.08 if game.nations[a].age == game.nations[b].age else -0.05
 			if statuses[a][b] == "alliance":
-				drift += 0.3
+				drift += 0.15
 			elif statuses[a][b] == "war":
-				drift -= 0.5
-				game.nations[a].war_weariness += 0.002 * (1.0 + game.nations[a].modv("warWeariness"))
-				game.nations[b].war_weariness += 0.002 * (1.0 + game.nations[b].modv("warWeariness"))
+				drift -= 0.25
+				game.nations[a].war_weariness += 0.001 * (1.0 + game.nations[a].modv("warWeariness"))
+				game.nations[b].war_weariness += 0.001 * (1.0 + game.nations[b].modv("warWeariness"))
 			# regression to neutral
-			drift += -signf(relations[a][b]) * 0.05
+			drift += -signf(relations[a][b]) * 0.025
 			shift_rel(a, b, drift)
 
 

@@ -5,6 +5,20 @@
 'use strict';
 window.CHANGELOG = [
   {
+    version: '0.9.0',
+    date: '2026-07-12',
+    title: 'Monthly ticks',
+    changes: [
+      'THE CALENDAR NOW TICKS IN MONTHS: one tick = one month, 12 ticks = one year. The tick rate is 12× faster (0.6 s per tick at 1×) so a game-year still takes the same 7.2 s of real time — the overall pace is unchanged, but the world moves in finer steps.',
+      'All per-tick flows rescaled: economy (food, gold, materials, science, influence, strategic resources) applies 1/12 of its per-year rate each month. Data files and the wiki still list per-year figures.',
+      'Durations rebalanced to sensible month counts: buildings take time×1.5 months (a 6-time farm ≈ 9 months), unit training 4–36 months by cost, units move and fight at one-third strength per monthly round, healing 0.8 hp/month, desertion and war-weariness decay scaled to monthly rates.',
+      'Diplomacy on the new clock: trade deals run 240 months (20 years) paying monthly, opinions drift once a year, proposal cooldowns are 120 months after an accept / 240 after a decline.',
+      'Events roll monthly (same yearly frequency as before) and their year-based durations convert to months on application.',
+      'HUD date line shows the month ("Ancient • Year 51, M4"); saves store the month counter (older saves derive it from the year).',
+      'Self-test long-run extended to 1,500 monthly ticks (~125 years) with calendar and research-progress checks.',
+    ],
+  },
+  {
     version: '0.8.0',
     date: '2026-07-12',
     title: 'Consent diplomacy, living fog, island freedom',

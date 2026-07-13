@@ -218,7 +218,7 @@ func tick_update(delta: float) -> void:
 	else:
 		_research_btn.text = "Sci: (+%.1f banked)" % income.get("science", 0.0)
 	var age_def: Dictionary = Data.age_by_id[nat.age]
-	_age_label.text = "%s  •  Year %d" % [age_def.short, int(game.year)]
+	_age_label.text = "%s  •  Year %d, M%d" % [age_def.short, 1 + game.months / 12, game.months % 12 + 1]
 	# Refresh open panels only when the simulation actually ticked, and never
 	# while the mouse is over them — rebuilding buttons under the cursor was
 	# eating clicks ("have to click multiple times").

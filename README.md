@@ -4,11 +4,12 @@ A globe-spanning grand-strategy game: one procedurally generated planet, eight a
 (Ancient → Near Future), ~290 technologies, influence-driven borders, war, diplomacy,
 trade, fog of war and five victory conditions — built in **Godot 4.4**.
 
-![engine](https://img.shields.io/badge/engine-Godot%204.4-478cbf) ![status](https://img.shields.io/badge/version-0.8.0-e8c15a)
+![engine](https://img.shields.io/badge/engine-Godot%204.4-478cbf) ![status](https://img.shields.io/badge/version-0.9.0-e8c15a)
 
-Eras are equal-length and research-gated; the calendar is uniform (1 year per tick in
-every era) and the pace is deliberately unhurried — use the 2×/4× speed buttons when
-you want history to move faster.
+Eras are equal-length and research-gated; the calendar is uniform (1 tick = 1 month,
+12 months per year, in every era — a game-year takes 7.2 s at 1×) and the pace is
+deliberately unhurried — use the 2×/4× speed buttons when you want history to move
+faster.
 
 ## Play
 
@@ -76,8 +77,8 @@ territory, cities (farther) and units (scouts farther still); the map re-fogs be
 ```
 set AEONS_TEST=1 & tools\Godot_v4.4.1-stable_win64_console.exe --headless --path game
 ```
-runs a 39-check integration suite (research draws, annexation, districts, combat,
-fog transience, diplomacy proposals, exponential costs, save/load, 500-tick stability).
+runs a 40-check integration suite (research draws, annexation, districts, combat,
+fog transience, diplomacy proposals, exponential costs, save/load, 1500-month stability).
 
 Other dev env vars (still `AEONS_`-prefixed for compatibility): `AEONS_SEED`
 (quick-start, skip menu), `AEONS_SIM=<n>` (run n ticks at startup),

@@ -189,7 +189,7 @@ const RENDER = {
 
   ages(){
     const v=el('div');
-    v.appendChild(el('div','sec-intro','A nation advances to the next age after researching a threshold number of its current age\'s technologies, then picks 1 of 3 offered <b>perks</b> — so every era is roughly the same length. The calendar is abstract and uniform: <b>1 year per tick in every era</b>, starting at Year 1 (no real-world dates).'));
+    v.appendChild(el('div','sec-intro','A nation advances to the next age after researching a threshold number of its current age\'s technologies, then picks 1 of 3 offered <b>perks</b> — so every era is roughly the same length. The calendar is abstract and uniform: <b>1 tick = 1 month, 12 months per year, in every era</b>, starting at Year 1 (no real-world dates). Yields and costs below are listed per year; the engine applies 1/12 of each flow every monthly tick.'));
     AGES.forEach((a,i)=>{
       const c=el('div','card');
       c.style.borderLeft=`3px solid ${a.color}`;
@@ -240,7 +240,7 @@ const RENDER = {
       c.innerHTML=`<h3>${esc(b.name)}</h3>
         <div class="meta">${AGE_NAME(b.age)} · ${b.tech?('needs '+(TECHS[b.tech]?TECHS[b.tech].name:b.tech)):'available at start'}${b.unique?' · one per '+b.unique:''}</div>
         <div class="desc">${esc(b.desc)}</div>
-        <div class="chips">${costChips(b.cost)}${chip(b.time+' ticks','sci')}${chip(b.upkeep+' gold upkeep')}</div>
+        <div class="chips">${costChips(b.cost)}${chip(Math.ceil(b.time*1.5)+' months','sci')}${chip(b.upkeep+' gold upkeep')}</div>
         <div class="chips">${yields}${cons}</div>
         ${b.housing?`<div class="chips">${chip('+'+b.housing+' housing','mag')}${b.defense?chip('+'+b.defense+' defense'):''}</div>`:(b.defense?`<div class="chips">${chip('+'+b.defense+' defense')}</div>`:'')}
         <div class="desc"><b>Placement:</b> ${esc(place)}${b.place.deposit?' · needs '+DEPOSITS[b.place.deposit].name+' deposit':''}${b.requiresNationDeposit?' · needs '+DEPOSITS[b.requiresNationDeposit].name+' in borders':''}</div>
@@ -383,7 +383,7 @@ const RENDER = {
       if(!match(e.name+' '+e.desc)) continue;
       let fx=[];
       if(e.fx.res) fx.push(...Object.entries(e.fx.res).map(([k,val])=>`${signed(val)} ${k}`));
-      if(e.fx.mod) fx.push(...fmtMod(e.fx.mod).map(x=>x+(e.duration?` (${e.duration}t)`:'')));
+      if(e.fx.mod) fx.push(...fmtMod(e.fx.mod).map(x=>x+(e.duration?` (${e.duration}y = ${e.duration*12}mo)`:'')));
       if(e.fx.pop) fx.push(`${signed(e.fx.pop)} population`);
       if(e.fx.hostiles) fx.push(`spawn ${e.fx.hostiles} raiders`);
       if(e.fx.wreckBuilding) fx.push('destroy a building');
@@ -432,7 +432,7 @@ const RENDER = {
       ['Combat','Attacker strength vs. defender strength with terrain defense, experience, anti-cavalry bonuses and ranged (no counter-attack). Siege units deal multiplied damage to city defenses; only melee/cavalry can capture a fallen city. Armies heal in friendly territory.'],
       ['Diplomacy','Pairwise relations drift with shared borders, age parity, alliances and wars. Statuses: peace, non-aggression pact, alliance, war. Nothing friendly is automatic: AI offers of <b>alliance, pacts, trade and peace arrive as proposals you accept or decline</b> — only war arrives uninvited (and pulls in the defender\'s allies). Beyond treaties you can <b>send gifts</b> (+relations for Gold), <b>demand tribute</b> (Gold from weaker rivals, at a relations price), <b>denounce</b> (−25 relations, +15 Influence at home) and <b>break pacts</b>. Trade deals yield Gold to both sides (capacity set by tech).'],
       ['Research Draw','Research is chosen from a <b>drawn hand of options</b> (base 3; Writing, Scientific Method and Computers each add +1). The draw is weighted toward the branches your nation is <b>spec\'d into</b>: your researched-tech history, active policies (military policies pull Military techs…), perks and city specializations all raise their branch\'s weight, and current-age techs appear more often. You may reroll the hand for Influence (cost scales with age). Science accrues even while no research is selected (banked toward the next pick). The full tech tree screen shows the current hand highlighted in gold.'],
-      ['Ages &amp; Perks','Advancing an age requires researching a threshold of that age\'s techs, then choosing 1 of 3 perks. Eras are equal-length by design and the calendar is uniform — 1 year per tick in every era; a Score victory is judged if no one has won by year 4000.'],
+      ['Ages &amp; Perks','Advancing an age requires researching a threshold of that age\'s techs, then choosing 1 of 3 perks. Eras are equal-length by design and the calendar is uniform — 1 tick = 1 month, 12 months per year, in every era; a Score victory is judged if no one has won by year 4000.'],
       ['Random Events','Per-tick chance of a boon or bane, weighted and era-scaled, some conditional (at war, coastal, owns a biome/building/deposit) and some offering a choice. Nation perks and some techs improve event luck.'],
     ];
     for(const [t,d] of M){

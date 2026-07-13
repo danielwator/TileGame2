@@ -3,7 +3,7 @@
  *  A nation advances to the next age after researching
  *  `techsToAdvance` technologies of its current age — every era
  *  is therefore roughly the same length. The calendar is abstract
- *  and uniform: 1 year per tick, in every era.
+ *  and uniform: 1 tick = 1 month, 12 months per year, in every era.
  * ============================================================ */
 'use strict';
 window.AGES = [

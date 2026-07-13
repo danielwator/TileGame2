@@ -16,12 +16,16 @@ signal diplo_proposal()
 signal victory(nation_id: int, victory_id: String)
 
 const SAVE_VERSION := 3
-# real-time pace: one simulation tick every 7.2 s at 1x speed —
-# a deliberately slow burn; the 2x/4x buttons are there for a reason
-const TICK_SECONDS := 7.2
-# uniform abstract calendar: every tick advances the same number of years
-# regardless of era (eras are equal-length in ticks, gated purely by research)
-const YEARS_PER_TICK := 1.0
+# real-time pace: one simulation tick every 0.6 s at 1x speed.
+# A tick is ONE MONTH — 12 ticks make a year, so a game-year still takes
+# 7.2 s of real time and the overall pace is unchanged; the world just
+# breathes at a finer granularity.
+const TICK_SECONDS := 0.6
+# uniform abstract calendar: 1 month per tick, in every era
+const TICK_SCALE := 1.0 / 12.0    # data flows are authored per-year; x this per month
+const MOVE_SCALE := 1.0 / 3.0     # unit tiles-per-month pacing
+const COMBAT_SCALE := 1.0 / 3.0   # damage per monthly combat round
+const BUILD_TIME_SCALE := 1.5     # data build "time" units -> months
 const SCORE_VICTORY_YEAR := 4000.0
 const WORK_RADIUS := 3
 const CITY_MIN_DIST := 4
@@ -187,7 +191,8 @@ var ai
 var tick_count := 0
 var speed := 1.0                    # 0 = paused
 var _accum := 0.0
-var year := 1.0
+var months := 0                     # ticks elapsed = months elapsed
+var year := 1.0                     # derived: 1 + months / 12
 var map_dirty := true
 var over := false
 var winner := -1
@@ -816,7 +821,8 @@ func start_building(n: int, tile: int, slot: int, bid: String) -> bool:
 	for k: String in bdef.cost:
 		nat.res[k] -= bdef.cost[k] * maxf(0.3, 1.0 + nat.modv("buildCost"))
 	var arr := _ensure_slots(tile)
-	arr[slot] = {"id": bid, "city": tile_city[tile], "progress": 0, "time": int(bdef.time), "done": false}
+	arr[slot] = {"id": bid, "city": tile_city[tile], "progress": 0,
+		"time": int(ceil(float(bdef.time) * BUILD_TIME_SCALE)), "done": false}
 	map_dirty = true
 	return true
 
@@ -952,8 +958,9 @@ func train_unit(n: int, city, type: String) -> bool:
 	var mult := _unit_cost_mult(n, city)
 	for k: String in d.cost:
 		nations[n].res[k] -= d.cost[k] * mult
-	var ticks: int = maxi(2, int(float(d.cost.get("materials", 40)) / 12.0))
-	city.training = {"unit": type, "ticks": ticks}
+	# training takes months: a warrior musters in ~4, late-game titans up to 36
+	var months_t: int = clampi(int(float(d.cost.get("materials", 40)) / 15.0), 4, 36)
+	city.training = {"unit": type, "ticks": months_t}
 	return true
 
 
@@ -1111,7 +1118,8 @@ func resolve_proposal(accept: bool) -> void:
 		return
 	var p: Dictionary = pending_proposals.pop_front()
 	var from: int = p.from
-	diplo.prop_cooldown[str(from)] = tick_count + (90 if accept else 150)
+	# months: an accepted petitioner waits ~10 years, a rejected one ~20
+	diplo.prop_cooldown[str(from)] = tick_count + (120 if accept else 240)
 	if accept:
 		match p.kind:
 			"alliance":
@@ -1421,7 +1429,8 @@ func update(delta: float) -> void:
 
 func _do_tick() -> void:
 	tick_count += 1
-	year += YEARS_PER_TICK
+	months += 1
+	year = 1.0 + months / 12.0
 
 	for n in range(nations.size()):
 		if nations[n].alive:
@@ -1484,13 +1493,13 @@ func _economy_tick(n: int) -> void:
 			var can_run := true
 			if bdef.consumes != null:
 				for k: String in bdef.consumes:
-					if nat.res.get(k, 0.0) < bdef.consumes[k] * frac:
+					if nat.res.get(k, 0.0) < bdef.consumes[k] * frac * TICK_SCALE:
 						can_run = false
 			if not can_run:
 				continue
 			if bdef.consumes != null:
 				for k: String in bdef.consumes:
-					nat.res[k] -= bdef.consumes[k] * frac
+					nat.res[k] -= bdef.consumes[k] * frac * TICK_SCALE
 			# output scales with the biome of the SLOT the building occupies
 			var bio: String = slot_biome(t, s)
 			var bm := 1.0
@@ -1542,14 +1551,15 @@ func _economy_tick(n: int) -> void:
 	for k: String in income:
 		income[k] *= nat.bonus_mult
 
+	# ---- apply the year-rate flows at monthly granularity (x TICK_SCALE) ----
 	# food & growth
 	var net_food: float = income.food - float(total_pop)
-	nat.res.food = maxf(0.0, nat.res.food + net_food)
+	nat.res.food = maxf(0.0, nat.res.food + net_food * TICK_SCALE)
 	var cs := cities_of(n)
 	if not cs.is_empty():
 		var per_city := net_food / cs.size()
 		for c in cs:
-			c.growth += maxf(per_city, -3.0) + (0.3 if per_city > 0 else 0.0)
+			c.growth += (maxf(per_city, -3.0) + (0.3 if per_city > 0 else 0.0)) * TICK_SCALE
 			var thresh: float = GROWTH_BASE + GROWTH_PER_POP * float(c.pop)
 			var grow_mult: float = 1.0 + nat.modv("popGrowth")
 			if c.growth >= thresh / maxf(0.2, grow_mult):
@@ -1564,24 +1574,24 @@ func _economy_tick(n: int) -> void:
 					notify(n, "Starvation in %s!" % c.cname, "warn")
 
 	# strategic + core resources
-	nat.res.materials += income.materials
-	nat.res.coal += income.coal
-	nat.res.oil += income.oil
-	nat.res.circuits += income.circuits
-	nat.res.gold += income.gold - upkeep_gold - unit_upkeep
+	nat.res.materials += income.materials * TICK_SCALE
+	nat.res.coal += income.coal * TICK_SCALE
+	nat.res.oil += income.oil * TICK_SCALE
+	nat.res.circuits += income.circuits * TICK_SCALE
+	nat.res.gold += (income.gold - upkeep_gold - unit_upkeep) * TICK_SCALE
 	if nat.res.gold < 0.0:
 		nat.res.gold = 0.0
 		for u in units:
 			if u.nation_id == n:
-				u.hp -= u.max_hp * 0.02   # unpaid armies desert
+				u.hp -= u.max_hp * 0.005   # unpaid armies desert, month by month
 		notify(n, "Treasury empty — armies are deserting!", "warn")
 
 	# influence & border upkeep
 	var b_up := border_upkeep(n)
-	nat.res.influence += income.influence - b_up
+	nat.res.influence += (income.influence - b_up) * TICK_SCALE
 	if nat.res.influence < 0.0:
 		nat.res.influence = 0.0
-		if tick_count % 4 == 0:
+		if tick_count % 6 == 0:
 			_decay_border(n)
 
 	# research
@@ -1595,14 +1605,14 @@ func _economy_tick(n: int) -> void:
 			notify(n, "Your scholars await direction — pick a research option.", "warn")
 	elif nat.researching != "" and nat.is_human:
 		nat.remove_meta("nagged_research")
-	nat.research_progress += income.science
+	nat.research_progress += income.science * TICK_SCALE
 	if nat.researching != "":
 		var t: Dictionary = Data.techs[nat.researching]
 		if nat.research_progress >= float(t.cost):
 			nat.research_progress -= float(t.cost)
 			_complete_tech(n, nat.researching)
 
-	nat.war_weariness = maxf(0.0, nat.war_weariness - 0.001)
+	nat.war_weariness = maxf(0.0, nat.war_weariness - 0.0003)
 
 	# cache last income for UI
 	nat.set_meta("income", income)
@@ -1658,7 +1668,7 @@ func _movement_tick() -> void:
 		var nat_speed := 1.0
 		if u.nation_id >= 0:
 			nat_speed = 1.0 + nations[u.nation_id].modv("moveSpeed")
-		u.move_progress += float(d.move) * nat_speed / move_cost(u.type, next)
+		u.move_progress += float(d.move) * nat_speed * MOVE_SCALE / move_cost(u.type, next)
 		if u.move_progress >= 1.0:
 			u.move_progress = 0.0
 			u.tile = next
@@ -1723,14 +1733,14 @@ func _resolve_fight(a, b) -> void:
 	var terrain: float = 1.0 + float(Data.biomes[world.t_biome[b.tile]].defense)
 	var atk_power: float = float(da.atk) * a.exp * _combat_mods(a)
 	var def_power: float = float(db.def) * b.exp * def_mods * terrain * (1.5 if anti_cav else 1.0)
-	b.hp -= 9.0 * atk_power / maxf(1.0, atk_power + def_power) * (0.85 + rng.randf() * 0.3) * 3.0
+	b.hp -= 9.0 * atk_power / maxf(1.0, atk_power + def_power) * (0.85 + rng.randf() * 0.3) * 3.0 * COMBAT_SCALE
 	var notes_v = da.get("notes")
 	var ranged: bool = notes_v != null and String(notes_v).contains("Ranged")
 	if not ranged:
 		var counter: float = float(db.atk) * b.exp * (1.5 if anti_cav else 1.0)
-		a.hp -= 6.0 * counter / maxf(1.0, counter + float(da.def) * a.exp) * (0.85 + rng.randf() * 0.3) * 3.0
-	a.exp = minf(2.0, a.exp + 0.02)
-	b.exp = minf(2.0, b.exp + 0.02)
+		a.hp -= 6.0 * counter / maxf(1.0, counter + float(da.def) * a.exp) * (0.85 + rng.randf() * 0.3) * 3.0 * COMBAT_SCALE
+	a.exp = minf(2.0, a.exp + 0.007)
+	b.exp = minf(2.0, b.exp + 0.007)
 	a.fought_this_tick = true
 	b.fought_this_tick = true
 	if b.hp <= 0 and a.nation_id >= 0:
@@ -1742,11 +1752,11 @@ func _resolve_fight(a, b) -> void:
 func _resolve_siege(u, c) -> void:
 	var d: Dictionary = Data.units[u.type]
 	var siege_mult: float = float(d.get("siege", 1))
-	var dmg: float = float(d.atk) * u.exp * _combat_mods(u) * siege_mult * 0.15
+	var dmg: float = float(d.atk) * u.exp * _combat_mods(u) * siege_mult * 0.15 * COMBAT_SCALE
 	c.hp -= dmg
 	u.fought_this_tick = true
 	# city returns fire
-	u.hp -= city_defense(c) * 0.06
+	u.hp -= city_defense(c) * 0.06 * COMBAT_SCALE
 	if c.hp <= 0:
 		c.hp = 0
 		var can_capture: bool = d.cls == "melee" or d.cls == "cavalry"
@@ -1788,7 +1798,7 @@ func _healing_tick() -> void:
 		if u.fought_this_tick or u.hp >= u.max_hp or u.hp <= 0:
 			continue
 		if u.nation_id >= 0 and owner[u.tile] == u.nation_id:
-			u.hp = minf(u.max_hp, u.hp + 3.0 * (1.0 + nations[u.nation_id].modv("healRate")))
+			u.hp = minf(u.max_hp, u.hp + 0.8 * (1.0 + nations[u.nation_id].modv("healRate")))
 
 
 func _barbarian_tick() -> void:
@@ -1900,7 +1910,7 @@ func _win(n: int, vid: String) -> void:
 func save_game() -> void:
 	var data := {
 		"version": SAVE_VERSION,
-		"params": params, "tick": tick_count, "year": year,
+		"params": params, "tick": tick_count, "year": year, "months": months,
 		"owner": Array(owner), "tile_city": Array(tile_city),
 		"deposit": deposit, "world_capitals": world_capitals,
 		"buildings": [], "cities": [], "units": [], "nations": [],
@@ -1960,6 +1970,7 @@ func setup_from_save(data: Dictionary) -> void:
 	world_capitals = data.world_capitals.map(func(x): return int(x))
 	tick_count = int(data.tick)
 	year = float(data.year)
+	months = int(data.get("months", int((year - 1.0) * 12.0)))
 	buildings.resize(nt)
 	for t in range(nt):
 		var slots = data.buildings[t]

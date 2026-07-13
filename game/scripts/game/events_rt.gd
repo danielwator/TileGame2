@@ -7,7 +7,8 @@ class_name EventSystem
 extends RefCounted
 
 var game
-var roll_chance := 0.012
+# per-month roll (ticks are months); ~same event frequency per year as before
+var roll_chance := 0.001
 
 
 func _init(g) -> void:
@@ -134,7 +135,8 @@ func apply_fx(n: int, fx: Dictionary, ev: Dictionary) -> void:
 			else:
 				nat.res[k] = maxf(0.0, nat.res.get(k, 0.0) + amt)
 	if fx.has("mod"):
-		var dur: int = int(ev.get("duration", 20))
+		# event durations are authored in years — ticks are months now
+		var dur: int = int(ev.get("duration", 20)) * 12
 		nat.temp_mods.append({"mod": fx.mod, "until": game.tick_count + dur})
 		nat.mods_dirty = true
 	if fx.has("pop"):
